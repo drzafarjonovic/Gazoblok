@@ -9,6 +9,7 @@ router = Router()
 class WarehouseState(StatesGroup):
     material_id = State()
     miqdor = State()
+    birlik = State()
 
 def warehouse_menu():
     return ReplyKeyboardMarkup(
@@ -41,18 +42,24 @@ async def joriy_qoldiqlar(message: Message):
     for m in materials:
         material_id = m[0]
         nomi = m[1]
-        qoldiq = m[2]
-        birlik = m[3]
-        min_ch = min_map.get(material_id)
+        qoldiq_asosiy = m[2]
+        asosiy_birlik = m[3]
+        asl_birlik = m[4]
 
-        if min_ch and qoldiq <= min_ch:
+        # Asl birlikda ko'rsatish
+        qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
+
+        min_ch = min_map.get(material_id)
+        if min_ch and qoldiq_asosiy <= min_ch:
             status = "⚠️"
         else:
             status = "✅"
 
-        text += f"{status} {nomi}: {qoldiq:.2f} {birlik}\n"
+        text += f"{status} {nomi}: {qoldiq_asl:.2f} {asl_birlik}\n"
+
         if min_ch:
-            text += f"   Min chegara: {min_ch} {birlik}\n"
+            min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
+            text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
 
     await message.answer(text)
 
@@ -68,7 +75,7 @@ async def xom_ashyo_kirim(message: Message, state: FSMContext):
 
     text = "📦 Qaysi material keldi?\nRaqamini kiriting:\n\n"
     for m in materials:
-        text += f"{m[0]}. {m[1]} ({m[3]})\n"
+        text += f"{m[0]}. {m[1]} ({m[4]})\n"
 
     await state.update_data(materials=materials)
     await state.set_state(WarehouseState.material_id)
@@ -89,13 +96,12 @@ async def kirim_material(message: Message, state: FSMContext):
         await state.update_data(
             material_id=material_id,
             material_nomi=material[1],
-            material_birlik=material[3],
-            joriy_qoldiq=material[2]
+            asl_birlik=material[4],
+            joriy_qoldiq_asosiy=material[2]
         )
         await state.set_state(WarehouseState.miqdor)
         await message.answer(
             f"📥 {material[1]} dan qancha keldi?\n"
-            f"(Birlik: {material[3]})\n"
             f"Misol: 10"
         )
     except ValueError:
@@ -107,18 +113,39 @@ async def kirim_miqdor(message: Message, state: FSMContext):
         miqdor = float(message.text.replace(",", "."))
         if miqdor <= 0:
             raise ValueError
+        await state.update_data(miqdor=miqdor)
+        await state.set_state(WarehouseState.birlik)
         data = await state.get_data()
-
-        yangi_qoldiq = data["joriy_qoldiq"] + miqdor
-        await db.update_material_qoldiq(data["material_id"], yangi_qoldiq)
-        await state.clear()
-
         await message.answer(
-            f"✅ Kirim kiritildi!\n\n"
-            f"📦 {data['material_nomi']}\n"
-            f"   Kirim: +{miqdor} {data['material_birlik']}\n"
-            f"   Yangi qoldiq: {yangi_qoldiq:.2f} {data['material_birlik']}",
-            reply_markup=warehouse_menu()
+            f"Birligini kiriting:\n"
+            f"Misol: tonna, kg, g, litr, ml\n"
+            f"(Odatdagi: {data['asl_birlik']})"
         )
     except ValueError:
         await message.answer("❌ Faqat musbat son kiriting! Misol: 10")
+
+@router.message(WarehouseState.birlik)
+async def kirim_birlik(message: Message, state: FSMContext):
+    data = await state.get_data()
+    birlik = message.text.strip()
+    miqdor = data["miqdor"]
+    asl_birlik = data["asl_birlik"]
+    joriy_qoldiq_asosiy = data["joriy_qoldiq_asosiy"]
+
+    # Kirimni asosiy birlikka o'tkazamiz
+    kirim_asosiy, _ = db.birlikni_asosiyga(miqdor, birlik)
+    yangi_qoldiq_asosiy = joriy_qoldiq_asosiy + kirim_asosiy
+
+    await db.update_material_qoldiq(data["material_id"], yangi_qoldiq_asosiy)
+    await state.clear()
+
+    # Asl birlikda ko'rsatamiz
+    yangi_qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq_asosiy, asl_birlik)
+
+    await message.answer(
+        f"✅ Kirim kiritildi!\n\n"
+        f"📦 {data['material_nomi']}\n"
+        f"   Kirim: +{miqdor} {birlik}\n"
+        f"   Yangi qoldiq: {yangi_qoldiq_asl:.2f} {asl_birlik}",
+        reply_markup=warehouse_menu()
+        )
