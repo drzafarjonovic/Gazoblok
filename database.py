@@ -31,7 +31,6 @@ BIRLIK_LITR = {
 }
 
 def birlikni_asosiyga(miqdor, birlik):
-    """Istalgan birlikni asosiy birlikka o'tkazadi (kg yoki litr)"""
     birlik = birlik.lower().strip()
     if birlik in BIRLIK_KG:
         return miqdor * BIRLIK_KG[birlik], "kg"
@@ -41,7 +40,6 @@ def birlikni_asosiyga(miqdor, birlik):
         return miqdor, birlik
 
 def asosiydan_birlikga(miqdor_asosiy, birlik):
-    """Asosiy birlikdan (kg/litr) kerakli birlikka o'tkazadi"""
     birlik = birlik.lower().strip()
     if birlik in BIRLIK_KG:
         return miqdor_asosiy / BIRLIK_KG[birlik]
@@ -49,15 +47,6 @@ def asosiydan_birlikga(miqdor_asosiy, birlik):
         return miqdor_asosiy / BIRLIK_LITR[birlik]
     else:
         return miqdor_asosiy
-
-def birlik_turi(birlik):
-    """Birlik og'irlikmi yoki hajmmi"""
-    birlik = birlik.lower().strip()
-    if birlik in BIRLIK_KG:
-        return "og'irlik"
-    elif birlik in BIRLIK_LITR:
-        return "hajm"
-    return "noma'lum"
 
 # ── Database init ──
 async def init_db():
@@ -132,6 +121,39 @@ async def update_material_qoldiq(material_id, yangi_qoldiq_asosiy):
         )
         await db.commit()
 
+async def update_material(material_id, nomi, qoldiq, birlik):
+    qoldiq_asosiy, asosiy_birlik = birlikni_asosiyga(qoldiq, birlik)
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """UPDATE materials
+               SET nomi=?, qoldiq=?, birlik=?, asl_birlik=?
+               WHERE id=?""",
+            (nomi, qoldiq_asosiy, asosiy_birlik, birlik, material_id)
+        )
+        await db.commit()
+
+async def delete_material(material_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "DELETE FROM qolip_formula WHERE material_id=?", (material_id,)
+        )
+        await db.execute(
+            "DELETE FROM settings WHERE material_id=?", (material_id,)
+        )
+        await db.execute(
+            "DELETE FROM materials WHERE id=?", (material_id,)
+        )
+        await db.commit()
+
+async def clear_all_data():
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM materials")
+        await db.execute("DELETE FROM qolip_formula")
+        await db.execute("DELETE FROM production_log")
+        await db.execute("DELETE FROM sales_log")
+        await db.execute("DELETE FROM settings")
+        await db.commit()
+
 # ── Qolip formulasi ──
 async def get_qolip_formula():
     async with aiosqlite.connect(DB_NAME) as db:
@@ -168,10 +190,24 @@ async def add_production_log(sana, shablon, qolip_soni):
         )
         await db.commit()
 
+async def delete_last_production():
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT id FROM production_log ORDER BY id DESC LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            await db.execute(
+                "DELETE FROM production_log WHERE id=?", (row[0],)
+            )
+            await db.commit()
+            return True
+        return False
+
 async def get_production_by_date(sana):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT shablon, qolip_soni FROM production_log WHERE sana = ?",
+            "SELECT shablon, qolip_soni FROM production_log WHERE sana=?",
             (sana,)
         ) as cursor:
             return await cursor.fetchall()
@@ -194,10 +230,24 @@ async def add_sales_log(sana, block_type, miqdor):
         )
         await db.commit()
 
+async def delete_last_sale():
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT id FROM sales_log ORDER BY id DESC LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row:
+            await db.execute(
+                "DELETE FROM sales_log WHERE id=?", (row[0],)
+            )
+            await db.commit()
+            return True
+        return False
+
 async def get_sales_by_date(sana):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT block_type, miqdor FROM sales_log WHERE sana = ?",
+            "SELECT block_type, miqdor FROM sales_log WHERE sana=?",
             (sana,)
         ) as cursor:
             return await cursor.fetchall()
@@ -224,12 +274,12 @@ async def get_settings():
 async def set_min_chegara(material_id, min_chegara):
     async with aiosqlite.connect(DB_NAME) as db:
         existing = await db.execute(
-            "SELECT id FROM settings WHERE material_id = ?", (material_id,)
+            "SELECT id FROM settings WHERE material_id=?", (material_id,)
         )
         row = await existing.fetchone()
         if row:
             await db.execute(
-                "UPDATE settings SET min_chegara = ? WHERE material_id = ?",
+                "UPDATE settings SET min_chegara=? WHERE material_id=?",
                 (min_chegara, material_id)
             )
         else:
