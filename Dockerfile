@@ -7,4 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+ENV BOT_TOKEN=""
+
 CMD ["python", "bot.py"]
