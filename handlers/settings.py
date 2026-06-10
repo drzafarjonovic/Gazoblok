@@ -12,12 +12,10 @@ class MaterialState(StatesGroup):
     birlik = State()
 
 class FormulaState(StatesGroup):
-    material_id = State()
     miqdor = State()
     birlik = State()
 
 class MinChegaraState(StatesGroup):
-    material_id = State()
     miqdor = State()
 
 def sozlamalar_menu():
@@ -57,7 +55,10 @@ async def material_qoldiq(message: Message, state: FSMContext):
         qoldiq = float(message.text.replace(",", "."))
         await state.update_data(qoldiq=qoldiq)
         await state.set_state(MaterialState.birlik)
-        await message.answer("Birligini kiriting:\nMisol: tonna yoki kg yoki litr")
+        await message.answer(
+            "Birligini kiriting:\n"
+            "Misol: tonna, kg, litr, meshok"
+        )
     except ValueError:
         await message.answer("❌ Faqat son kiriting! Misol: 30")
 
@@ -119,34 +120,54 @@ async def formula_yangilash(message: Message, state: FSMContext):
     m = materials[0]
     await message.answer(
         f"1 qolipga {m[1]} dan qancha ketadi?\n"
-        f"(Birlik: {m[3]})\nMisol: 110"
+        f"(Ombordagi birlik: {m[3]})\n"
+        f"Misol: 110"
     )
 
 @router.message(FormulaState.miqdor)
 async def formula_miqdor(message: Message, state: FSMContext):
     try:
         miqdor = float(message.text.replace(",", "."))
+        await state.update_data(miqdor=miqdor)
+        await state.set_state(FormulaState.birlik)
         data = await state.get_data()
         materials = data["materials"]
         index = data["index"]
         m = materials[index]
-        await db.add_qolip_formula(m[0], miqdor, m[3])
-        index += 1
-        if index < len(materials):
-            await state.update_data(index=index)
-            next_m = materials[index]
-            await message.answer(
-                f"1 qolipga {next_m[1]} dan qancha ketadi?\n"
-                f"(Birlik: {next_m[3]})\nMisol: 50"
-            )
-        else:
-            await state.clear()
-            await message.answer(
-                "✅ Formula saqlandi!",
-                reply_markup=sozlamalar_menu()
-            )
+        await message.answer(
+            f"{m[1]} uchun birlikni kiriting:\n"
+            f"Misol: kg, g, litr, ml, meshok\n"
+            f"(Omborda: {m[3]})"
+        )
     except ValueError:
         await message.answer("❌ Faqat son kiriting! Misol: 110")
+
+@router.message(FormulaState.birlik)
+async def formula_birlik(message: Message, state: FSMContext):
+    data = await state.get_data()
+    materials = data["materials"]
+    index = data["index"]
+    miqdor = data["miqdor"]
+    m = materials[index]
+
+    await db.add_qolip_formula(m[0], miqdor, message.text)
+
+    index += 1
+    if index < len(materials):
+        await state.update_data(index=index)
+        await state.set_state(FormulaState.miqdor)
+        next_m = materials[index]
+        await message.answer(
+            f"1 qolipga {next_m[1]} dan qancha ketadi?\n"
+            f"(Ombordagi birlik: {next_m[3]})\n"
+            f"Misol: 50"
+        )
+    else:
+        await state.clear()
+        await message.answer(
+            "✅ Formula saqlandi!",
+            reply_markup=sozlamalar_menu()
+        )
 
 # ── Minimum chegara ──
 @router.message(F.text == "⚠️ Minimum chegara")
@@ -160,7 +181,8 @@ async def min_chegara(message: Message, state: FSMContext):
     m = materials[0]
     await message.answer(
         f"{m[1]} uchun minimum chegara qancha?\n"
-        f"(Birlik: {m[3]})\nMisol: 5"
+        f"(Birlik: {m[3]})\n"
+        f"Misol: 5"
     )
 
 @router.message(MinChegaraState.miqdor)
@@ -178,7 +200,8 @@ async def min_chegara_miqdor(message: Message, state: FSMContext):
             next_m = materials[index]
             await message.answer(
                 f"{next_m[1]} uchun minimum chegara qancha?\n"
-                f"(Birlik: {next_m[3]})\nMisol: 5"
+                f"(Birlik: {next_m[3]})\n"
+                f"Misol: 5"
             )
         else:
             await state.clear()
