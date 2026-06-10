@@ -94,6 +94,25 @@ async def init_db():
                 FOREIGN KEY (material_id) REFERENCES materials(id)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS finished_goods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_type TEXT NOT NULL UNIQUE,
+                qoldiq INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kalit TEXT NOT NULL UNIQUE,
+                qiymat TEXT NOT NULL
+            )
+        """)
+        # Dastlabki tayyor mahsulot qatorlari
+        await db.execute("""
+            INSERT OR IGNORE INTO finished_goods (block_type, qoldiq)
+            VALUES ('A', 0), ('B', 0)
+        """)
         await db.commit()
 
 # ── Materiallar ──
@@ -152,6 +171,7 @@ async def clear_all_data():
         await db.execute("DELETE FROM production_log")
         await db.execute("DELETE FROM sales_log")
         await db.execute("DELETE FROM settings")
+        await db.execute("UPDATE finished_goods SET qoldiq=0")
         await db.commit()
 
 # ── Qolip formulasi ──
@@ -260,6 +280,51 @@ async def get_sales_range(boshliq, oxiri):
             (boshliq, oxiri)
         ) as cursor:
             return await cursor.fetchall()
+
+# ── Tayyor mahsulot ombori ──
+async def get_finished_goods():
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT block_type, qoldiq FROM finished_goods ORDER BY block_type"
+        ) as cursor:
+            return await cursor.fetchall()
+
+async def set_finished_goods(block_type, qoldiq):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE finished_goods SET qoldiq=? WHERE block_type=?",
+            (qoldiq, block_type)
+        )
+        await db.commit()
+
+async def update_finished_goods(block_type, delta):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """UPDATE finished_goods
+               SET qoldiq = MAX(0, qoldiq + ?)
+               WHERE block_type=?""",
+            (delta, block_type)
+        )
+        await db.commit()
+
+# ── Bot sozlamalari ──
+async def get_bot_setting(kalit):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT qiymat FROM bot_settings WHERE kalit=?", (kalit,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def set_bot_setting(kalit, qiymat):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            """INSERT INTO bot_settings (kalit, qiymat)
+               VALUES (?, ?)
+               ON CONFLICT(kalit) DO UPDATE SET qiymat=?""",
+            (kalit, qiymat, qiymat)
+        )
+        await db.commit()
 
 # ── Sozlamalar ──
 async def get_settings():
