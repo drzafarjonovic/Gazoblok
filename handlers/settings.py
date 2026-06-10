@@ -27,6 +27,9 @@ class MinChegaraState(StatesGroup):
 class ClearConfirmState(StatesGroup):
     tasdiqlash = State()
 
+class AutoHisobotState(StatesGroup):
+    vaqt = State()
+
 def sozlamalar_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -36,6 +39,7 @@ def sozlamalar_menu():
             [KeyboardButton(text="📦 Materiallar ro'yxati")],
             [KeyboardButton(text="✏️ Materialni tahrirlash")],
             [KeyboardButton(text="🗑️ Materialni o'chirish")],
+            [KeyboardButton(text="🔔 Avtomatik hisobot vaqti")],
             [KeyboardButton(text="🗑️ Barcha ma'lumotlarni tozalash")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
@@ -199,6 +203,56 @@ async def material_ochirish_tasdiqlash(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Faqat raqam kiriting!")
         await state.clear()
+
+# ── Avtomatik hisobot vaqti ──
+@router.message(F.text == "🔔 Avtomatik hisobot vaqti")
+async def avto_hisobot_vaqti(message: Message, state: FSMContext):
+    joriy_vaqt = await db.get_bot_setting("hisobot_vaqti")
+    if joriy_vaqt:
+        joriy_text = f"Hozirgi vaqt: {joriy_vaqt}"
+    else:
+        joriy_text = "Hali belgilanmagan"
+    await state.set_state(AutoHisobotState.vaqt)
+    await message.answer(
+        f"🔔 Avtomatik kunlik hisobot vaqtini kiriting:\n"
+        f"{joriy_text}\n\n"
+        f"Format: HH:MM\n"
+        f"Misol: 21:00 yoki 08:30\n\n"
+        f"O'chirish uchun: 0"
+    )
+
+@router.message(AutoHisobotState.vaqt)
+async def avto_hisobot_vaqti_saqlash(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if text == "0":
+        await db.set_bot_setting("hisobot_vaqti", "")
+        await state.clear()
+        await message.answer(
+            "✅ Avtomatik hisobot o'chirildi!",
+            reply_markup=sozlamalar_menu()
+        )
+        return
+    try:
+        parts = text.split(":")
+        if len(parts) != 2:
+            raise ValueError
+        soat = int(parts[0])
+        daqiqa = int(parts[1])
+        if not (0 <= soat <= 23 and 0 <= daqiqa <= 59):
+            raise ValueError
+        vaqt = f"{soat:02d}:{daqiqa:02d}"
+        await db.set_bot_setting("hisobot_vaqti", vaqt)
+        await state.clear()
+        await message.answer(
+            f"✅ Avtomatik hisobot vaqti belgilandi!\n"
+            f"⏰ Har kuni soat {vaqt} da hisobot keladi.",
+            reply_markup=sozlamalar_menu()
+        )
+    except ValueError:
+        await message.answer(
+            "❌ Noto'g'ri format!\n"
+            "To'g'ri: 21:00 yoki 08:30"
+        )
 
 # ── Barcha ma'lumotlarni tozalash ──
 @router.message(F.text == "🗑️ Barcha ma'lumotlarni tozalash")
