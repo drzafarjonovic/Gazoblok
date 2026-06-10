@@ -7,7 +7,6 @@ import database as db
 
 router = Router()
 
-# Shablon ma'lumotlari
 SHABLON = {
     1: {"nomi": "Shablon 1 (faqat A: 12 ta)", "A": 12, "B": 0},
     2: {"nomi": "Shablon 2 (faqat B: 24 ta)", "A": 0, "B": 24},
@@ -115,33 +114,35 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
         if s3 > 0:
             await db.add_production_log(bugun, 3, s3)
 
-        # Xom ashyoni kamaytirish
+        # Xom ashyoni kamaytirish — asosiy birlik (kg/litr) da
         formula = await db.get_qolip_formula()
         ogohlantirish = []
+        sarflar = []
 
         for f in formula:
-            # f: (nomi, miqdor, formula_birlik, qoldiq, material_birlik, material_id)
+            # f: (nomi, miqdor, birlik, qoldiq_asosiy, asosiy_birlik,
+            #     material_id, miqdor_asosiy, asl_birlik)
             nomi = f[0]
-            miqdor_per_qolip = f[1]
-            formula_birlik = f[2]
-            qoldiq = f[3]
-            material_birlik = f[4]
+            miqdor_asosiy = f[6]  # 1 qolipga ketadigan asosiy birlikda
+            qoldiq_asosiy = f[3]  # ombordagi qoldiq asosiy birlikda
+            asosiy_birlik = f[4]  # kg yoki litr
+            asl_birlik = f[7]     # foydalanuvchi kiritgan birlik
             material_id = f[5]
 
-            # Birlik konversiyasi
-            ketgan = miqdor_per_qolip * jami_qolip
-            if formula_birlik == "kg" and material_birlik == "tonna":
-                ketgan = ketgan / 1000
-            elif formula_birlik == "tonna" and material_birlik == "kg":
-                ketgan = ketgan * 1000
-            elif formula_birlik == "g" and material_birlik == "kg":
-                ketgan = ketgan / 1000
-
-            yangi_qoldiq = qoldiq - ketgan
-            if yangi_qoldiq < 0:
-                yangi_qoldiq = 0
+            # Jami ketgan (asosiy birlikda)
+            ketgan_asosiy = miqdor_asosiy * jami_qolip
+            yangi_qoldiq = max(0, qoldiq_asosiy - ketgan_asosiy)
 
             await db.update_material_qoldiq(material_id, yangi_qoldiq)
+
+            # Ko'rsatish uchun asl birlikka qaytaramiz
+            ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
+            qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq, asl_birlik)
+
+            sarflar.append(
+                f"   {nomi}: -{ketgan_asl:.2f} {asl_birlik} "
+                f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
+            )
 
             # Minimum chegara tekshirish
             settings = await db.get_settings()
@@ -149,11 +150,12 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                 if s[3] == material_id and yangi_qoldiq <= s[1]:
                     ogohlantirish.append(
                         f"⚠️ {nomi} kam qoldi!\n"
-                        f"   Qoldiq: {yangi_qoldiq:.2f} {material_birlik}\n"
-                        f"   Minimum: {s[1]} {s[2]}"
+                        f"   Qoldiq: {qoldiq_asl:.2f} {asl_birlik}\n"
+                        f"   Minimum: {db.asosiydan_birlikga(s[1], asl_birlik):.2f} {asl_birlik}"
                     )
 
-        # Natija
+        sarflar_text = "\n".join(sarflar)
+
         text = (
             f"✅ Ishlab chiqarish kiritildi!\n\n"
             f"📦 Jami qolip: {jami_qolip} ta\n"
@@ -162,7 +164,9 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             f"   Shablon 3: {s3} qolip\n\n"
             f"🧱 Tayyor bloklar:\n"
             f"   A blok: {A_blok} ta\n"
-            f"   B blok: {B_blok} ta\n"
+            f"   B blok: {B_blok} ta\n\n"
+            f"📉 Sarflangan materiallar:\n"
+            f"{sarflar_text}"
         )
 
         await message.answer(text, reply_markup=production_menu())
