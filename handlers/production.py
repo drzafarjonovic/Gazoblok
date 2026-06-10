@@ -7,12 +7,6 @@ import database as db
 
 router = Router()
 
-SHABLON = {
-    1: {"nomi": "Shablon 1 (faqat A: 12 ta)", "A": 12, "B": 0},
-    2: {"nomi": "Shablon 2 (faqat B: 24 ta)", "A": 0, "B": 24},
-    3: {"nomi": "Shablon 3 (aralash: 11A + 2B)", "A": 11, "B": 2},
-}
-
 class ProductionState(StatesGroup):
     shablon1 = State()
     shablon2 = State()
@@ -23,6 +17,7 @@ def production_menu():
         keyboard=[
             [KeyboardButton(text="🏭 Ishlab chiqarishni kiritish")],
             [KeyboardButton(text="📋 Bugungi ishlab chiqarish")],
+            [KeyboardButton(text="🗑️ Oxirgi yozuvni o'chirish")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
         resize_keyboard=True
@@ -101,11 +96,9 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             await message.answer("❌ Hech qolip kiritilmadi!")
             return
 
-        # Bloklar hisobi
         A_blok = s1 * 12 + s3 * 11
         B_blok = s2 * 24 + s3 * 2
 
-        # Bazaga yozish
         bugun = str(date.today())
         if s1 > 0:
             await db.add_production_log(bugun, 1, s1)
@@ -114,28 +107,22 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
         if s3 > 0:
             await db.add_production_log(bugun, 3, s3)
 
-        # Xom ashyoni kamaytirish — asosiy birlik (kg/litr) da
         formula = await db.get_qolip_formula()
         ogohlantirish = []
         sarflar = []
 
         for f in formula:
-            # f: (nomi, miqdor, birlik, qoldiq_asosiy, asosiy_birlik,
-            #     material_id, miqdor_asosiy, asl_birlik)
             nomi = f[0]
-            miqdor_asosiy = f[6]  # 1 qolipga ketadigan asosiy birlikda
-            qoldiq_asosiy = f[3]  # ombordagi qoldiq asosiy birlikda
-            asosiy_birlik = f[4]  # kg yoki litr
-            asl_birlik = f[7]     # foydalanuvchi kiritgan birlik
+            miqdor_asosiy = f[6]
+            qoldiq_asosiy = f[3]
+            asl_birlik = f[7]
             material_id = f[5]
 
-            # Jami ketgan (asosiy birlikda)
             ketgan_asosiy = miqdor_asosiy * jami_qolip
             yangi_qoldiq = max(0, qoldiq_asosiy - ketgan_asosiy)
 
             await db.update_material_qoldiq(material_id, yangi_qoldiq)
 
-            # Ko'rsatish uchun asl birlikka qaytaramiz
             ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
             qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq, asl_birlik)
 
@@ -144,7 +131,6 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                 f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
             )
 
-            # Minimum chegara tekshirish
             settings = await db.get_settings()
             for s in settings:
                 if s[3] == material_id and yangi_qoldiq <= s[1]:
@@ -155,20 +141,16 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                     )
 
         sarflar_text = "\n".join(sarflar)
-
         text = (
             f"✅ Ishlab chiqarish kiritildi!\n\n"
             f"📦 Jami qolip: {jami_qolip} ta\n"
-            f"   Shablon 1: {s1} qolip\n"
-            f"   Shablon 2: {s2} qolip\n"
-            f"   Shablon 3: {s3} qolip\n\n"
+            f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n\n"
             f"🧱 Tayyor bloklar:\n"
             f"   A blok: {A_blok} ta\n"
             f"   B blok: {B_blok} ta\n\n"
-            f"📉 Sarflangan materiallar:\n"
+            f"📉 Sarflangan:\n"
             f"{sarflar_text}"
         )
-
         await message.answer(text, reply_markup=production_menu())
 
         if ogohlantirish:
@@ -177,7 +159,20 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
     except ValueError:
         await message.answer("❌ Faqat musbat son kiriting! Misol: 2")
 
-# ── Bugungi ishlab chiqarish ──
+@router.message(F.text == "🗑️ Oxirgi yozuvni o'chirish")
+async def oxirgi_production_ochirish(message: Message):
+    natija = await db.delete_last_production()
+    if natija:
+        await message.answer(
+            "✅ Oxirgi ishlab chiqarish yozuvi o'chirildi!",
+            reply_markup=production_menu()
+        )
+    else:
+        await message.answer(
+            "❌ O'chiriladigan yozuv yo'q!",
+            reply_markup=production_menu()
+        )
+
 @router.message(F.text == "📋 Bugungi ishlab chiqarish")
 async def bugungi_production(message: Message):
     bugun = str(date.today())
@@ -203,9 +198,7 @@ async def bugungi_production(message: Message):
     text = (
         f"📋 Bugungi ishlab chiqarish:\n\n"
         f"📦 Jami qolip: {jami_qolip} ta\n"
-        f"   Shablon 1: {s1} qolip\n"
-        f"   Shablon 2: {s2} qolip\n"
-        f"   Shablon 3: {s3} qolip\n\n"
+        f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n\n"
         f"🧱 Tayyor bloklar:\n"
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n"
