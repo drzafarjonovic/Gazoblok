@@ -16,6 +16,7 @@ def sales_menu():
         keyboard=[
             [KeyboardButton(text="💰 Sotuv kiritish")],
             [KeyboardButton(text="📋 Bugungi sotuv")],
+            [KeyboardButton(text="🗑️ Oxirgi sotuvni o'chirish")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
         resize_keyboard=True
@@ -77,6 +78,20 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
         )
     except ValueError:
         await message.answer("❌ Faqat musbat son kiriting! Misol: 100")
+
+@router.message(F.text == "🗑️ Oxirgi sotuvni o'chirish")
+async def oxirgi_sotuv_ochirish(message: Message):
+    natija = await db.delete_last_sale()
+    if natija:
+        await message.answer(
+            "✅ Oxirgi sotuv yozuvi o'chirildi!",
+            reply_markup=sales_menu()
+        )
+    else:
+        await message.answer(
+            "❌ O'chiriladigan yozuv yo'q!",
+            reply_markup=sales_menu()
+        )
 
 @router.message(F.text == "📋 Bugungi sotuv")
 async def bugungi_sotuv(message: Message):
