@@ -11,12 +11,21 @@ class MaterialState(StatesGroup):
     qoldiq = State()
     birlik = State()
 
+class MaterialEditState(StatesGroup):
+    material_id = State()
+    nomi = State()
+    qoldiq = State()
+    birlik = State()
+
 class FormulaState(StatesGroup):
     miqdor = State()
     birlik = State()
 
 class MinChegaraState(StatesGroup):
     miqdor = State()
+
+class ClearConfirmState(StatesGroup):
+    tasdiqlash = State()
 
 def sozlamalar_menu():
     return ReplyKeyboardMarkup(
@@ -25,6 +34,9 @@ def sozlamalar_menu():
             [KeyboardButton(text="📋 Qolip formulasi")],
             [KeyboardButton(text="⚠️ Minimum chegara")],
             [KeyboardButton(text="📦 Materiallar ro'yxati")],
+            [KeyboardButton(text="✏️ Materialni tahrirlash")],
+            [KeyboardButton(text="🗑️ Materialni o'chirish")],
+            [KeyboardButton(text="🗑️ Barcha ma'lumotlarni tozalash")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
         resize_keyboard=True
@@ -82,8 +94,144 @@ async def materiallar_royxati(message: Message):
         return
     text = "📦 Materiallar:\n\n"
     for m in materials:
-        text += f"🔹 {m[0]}. {m[1]} — {m[2]} {m[3]}\n"
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        text += f"🔹 {m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
     await message.answer(text)
+
+# ── Materialni tahrirlash ──
+@router.message(F.text == "✏️ Materialni tahrirlash")
+async def material_tahrirlash(message: Message, state: FSMContext):
+    materials = await db.get_materials()
+    if not materials:
+        await message.answer("❌ Hali material kiritilmagan!")
+        return
+    text = "✏️ Qaysi materialni tahrirlash?\nRaqamini kiriting:\n\n"
+    for m in materials:
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
+    await state.update_data(materials=materials)
+    await state.set_state(MaterialEditState.material_id)
+    await message.answer(text)
+
+@router.message(MaterialEditState.material_id)
+async def material_tahrirlash_id(message: Message, state: FSMContext):
+    try:
+        material_id = int(message.text)
+        data = await state.get_data()
+        materials = data["materials"]
+        material = next((m for m in materials if m[0] == material_id), None)
+        if not material:
+            await message.answer("❌ Bunday raqam yo'q!")
+            return
+        await state.update_data(material_id=material_id)
+        await state.set_state(MaterialEditState.nomi)
+        await message.answer(
+            f"Yangi nom kiriting:\n"
+            f"(Hozirgi: {material[1]})"
+        )
+    except ValueError:
+        await message.answer("❌ Faqat raqam kiriting!")
+
+@router.message(MaterialEditState.nomi)
+async def material_tahrirlash_nomi(message: Message, state: FSMContext):
+    await state.update_data(nomi=message.text)
+    await state.set_state(MaterialEditState.qoldiq)
+    await message.answer("Yangi qoldiq miqdorini kiriting:\nMisol: 25")
+
+@router.message(MaterialEditState.qoldiq)
+async def material_tahrirlash_qoldiq(message: Message, state: FSMContext):
+    try:
+        qoldiq = float(message.text.replace(",", "."))
+        await state.update_data(qoldiq=qoldiq)
+        await state.set_state(MaterialEditState.birlik)
+        await message.answer("Yangi birlikni kiriting:\nMisol: tonna, kg, litr")
+    except ValueError:
+        await message.answer("❌ Faqat son kiriting!")
+
+@router.message(MaterialEditState.birlik)
+async def material_tahrirlash_birlik(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await db.update_material(
+        data["material_id"],
+        data["nomi"],
+        data["qoldiq"],
+        message.text
+    )
+    await state.clear()
+    await message.answer(
+        f"✅ Material yangilandi!\n"
+        f"{data['nomi']} — {data['qoldiq']} {message.text}",
+        reply_markup=sozlamalar_menu()
+    )
+
+# ── Materialni o'chirish ──
+@router.message(F.text == "🗑️ Materialni o'chirish")
+async def material_ochirish(message: Message, state: FSMContext):
+    materials = await db.get_materials()
+    if not materials:
+        await message.answer("❌ Hali material kiritilmagan!")
+        return
+    text = "🗑️ Qaysi materialni o'chirish?\nRaqamini kiriting:\n\n"
+    for m in materials:
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
+    await state.update_data(materials=materials)
+    await state.set_state(ClearConfirmState.tasdiqlash)
+    await message.answer(text)
+
+@router.message(ClearConfirmState.tasdiqlash)
+async def material_ochirish_tasdiqlash(message: Message, state: FSMContext):
+    try:
+        material_id = int(message.text)
+        data = await state.get_data()
+        materials = data["materials"]
+        material = next((m for m in materials if m[0] == material_id), None)
+        if not material:
+            await message.answer("❌ Bunday raqam yo'q!")
+            await state.clear()
+            return
+        await db.delete_material(material_id)
+        await state.clear()
+        await message.answer(
+            f"✅ {material[1]} o'chirildi!",
+            reply_markup=sozlamalar_menu()
+        )
+    except ValueError:
+        await message.answer("❌ Faqat raqam kiriting!")
+        await state.clear()
+
+# ── Barcha ma'lumotlarni tozalash ──
+@router.message(F.text == "🗑️ Barcha ma'lumotlarni tozalash")
+async def barchani_tozalash(message: Message):
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Ha, tozalash")],
+            [KeyboardButton(text="❌ Yo'q, bekor qilish")],
+        ],
+        resize_keyboard=True
+    )
+    await message.answer(
+        "⚠️ DIQQAT!\n\n"
+        "Barcha materiallar, formula, ishlab chiqarish "
+        "va sotuv ma'lumotlari o'chib ketadi!\n\n"
+        "Davom etasizmi?",
+        reply_markup=keyboard
+    )
+
+@router.message(F.text == "✅ Ha, tozalash")
+async def barchani_tozalash_tasdiqlash(message: Message):
+    await db.clear_all_data()
+    await message.answer(
+        "✅ Barcha ma'lumotlar tozalandi!",
+        reply_markup=sozlamalar_menu()
+    )
+
+@router.message(F.text == "❌ Yo'q, bekor qilish")
+async def barchani_tozalash_bekor(message: Message):
+    await message.answer(
+        "❌ Bekor qilindi!",
+        reply_markup=sozlamalar_menu()
+    )
 
 # ── Qolip formulasi ──
 @router.message(F.text == "📋 Qolip formulasi")
@@ -120,7 +268,7 @@ async def formula_yangilash(message: Message, state: FSMContext):
     m = materials[0]
     await message.answer(
         f"1 qolipga {m[1]} dan qancha ketadi?\n"
-        f"(Ombordagi birlik: {m[3]})\n"
+        f"(Ombordagi birlik: {m[4]})\n"
         f"Misol: 110"
     )
 
@@ -136,8 +284,8 @@ async def formula_miqdor(message: Message, state: FSMContext):
         m = materials[index]
         await message.answer(
             f"{m[1]} uchun birlikni kiriting:\n"
-            f"Misol: kg, g, litr, ml, meshok\n"
-            f"(Omborda: {m[3]})"
+            f"Misol: kg, g, litr, ml\n"
+            f"(Omborda: {m[4]})"
         )
     except ValueError:
         await message.answer("❌ Faqat son kiriting! Misol: 110")
@@ -149,9 +297,7 @@ async def formula_birlik(message: Message, state: FSMContext):
     index = data["index"]
     miqdor = data["miqdor"]
     m = materials[index]
-
     await db.add_qolip_formula(m[0], miqdor, message.text)
-
     index += 1
     if index < len(materials):
         await state.update_data(index=index)
@@ -159,7 +305,7 @@ async def formula_birlik(message: Message, state: FSMContext):
         next_m = materials[index]
         await message.answer(
             f"1 qolipga {next_m[1]} dan qancha ketadi?\n"
-            f"(Ombordagi birlik: {next_m[3]})\n"
+            f"(Ombordagi birlik: {next_m[4]})\n"
             f"Misol: 50"
         )
     else:
@@ -181,7 +327,7 @@ async def min_chegara(message: Message, state: FSMContext):
     m = materials[0]
     await message.answer(
         f"{m[1]} uchun minimum chegara qancha?\n"
-        f"(Birlik: {m[3]})\n"
+        f"(Birlik: {m[4]})\n"
         f"Misol: 5"
     )
 
@@ -193,14 +339,15 @@ async def min_chegara_miqdor(message: Message, state: FSMContext):
         materials = data["materials"]
         index = data["index"]
         m = materials[index]
-        await db.set_min_chegara(m[0], miqdor)
+        min_asosiy, _ = db.birlikni_asosiyga(miqdor, m[4])
+        await db.set_min_chegara(m[0], min_asosiy)
         index += 1
         if index < len(materials):
             await state.update_data(index=index)
             next_m = materials[index]
             await message.answer(
                 f"{next_m[1]} uchun minimum chegara qancha?\n"
-                f"(Birlik: {next_m[3]})\n"
+                f"(Birlik: {next_m[4]})\n"
                 f"Misol: 5"
             )
         else:
