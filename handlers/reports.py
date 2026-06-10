@@ -28,12 +28,20 @@ def hisobla_production(logs):
     jami_qolip = s1 + s2 + s3
     A_blok = s1 * 12 + s3 * 11
     B_blok = s2 * 24 + s3 * 2
-    return jami_qolip, A_blok, B_blok
+    return jami_qolip, A_blok, B_blok, s1, s2, s3
 
 def hisobla_sales(logs):
     A = sum(log[2] for log in logs if log[1] == "A")
     B = sum(log[2] for log in logs if log[1] == "B")
     return A, B
+
+async def ombor_holati():
+    materials = await db.get_materials()
+    text = ""
+    for m in materials:
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        text += f"   {m[1]}: {qoldiq_asl:.2f} {m[4]}\n"
+    return text if text else "   Ma'lumot yo'q\n"
 
 @router.message(F.text == "📊 Hisobot")
 async def hisobot(message: Message):
@@ -48,19 +56,17 @@ async def kunlik_hisobot(message: Message):
     prod_logs = await db.get_production_range(bugun, bugun)
     sales_logs = await db.get_sales_range(bugun, bugun)
 
-    jami_qolip, A_blok, B_blok = hisobla_production(prod_logs)
+    jami_qolip, A_blok, B_blok, s1, s2, s3 = hisobla_production(prod_logs)
     A_sotuv, B_sotuv = hisobla_sales(sales_logs)
-
-    materials = await db.get_materials()
-    ombor_text = ""
-    for m in materials:
-        ombor_text += f"   {m[1]}: {m[2]:.2f} {m[3]}\n"
+    ombor = await ombor_holati()
 
     text = (
-        f"📊 Kunlik hisobot — {bugun}\n"
+        f"📊 Kunlik hisobot\n"
+        f"📅 {bugun}\n"
         f"━━━━━━━━━━━━━━━━\n\n"
         f"🏭 Ishlab chiqarish:\n"
         f"   Jami qolip: {jami_qolip} ta\n"
+        f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n"
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n\n"
         f"💰 Sotuv:\n"
@@ -68,7 +74,7 @@ async def kunlik_hisobot(message: Message):
         f"   B blok: {B_sotuv} ta\n"
         f"   Jami: {A_sotuv + B_sotuv} ta\n\n"
         f"🏪 Ombor qoldig'i:\n"
-        f"{ombor_text}"
+        f"{ombor}"
     )
     await message.answer(text, reply_markup=reports_menu())
 
@@ -81,8 +87,9 @@ async def haftalik_hisobot(message: Message):
     prod_logs = await db.get_production_range(boshliq, oxiri)
     sales_logs = await db.get_sales_range(boshliq, oxiri)
 
-    jami_qolip, A_blok, B_blok = hisobla_production(prod_logs)
+    jami_qolip, A_blok, B_blok, s1, s2, s3 = hisobla_production(prod_logs)
     A_sotuv, B_sotuv = hisobla_sales(sales_logs)
+    ombor = await ombor_holati()
 
     text = (
         f"📊 Haftalik hisobot\n"
@@ -90,12 +97,15 @@ async def haftalik_hisobot(message: Message):
         f"━━━━━━━━━━━━━━━━\n\n"
         f"🏭 Ishlab chiqarish:\n"
         f"   Jami qolip: {jami_qolip} ta\n"
+        f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n"
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n\n"
         f"💰 Sotuv:\n"
         f"   A blok: {A_sotuv} ta\n"
         f"   B blok: {B_sotuv} ta\n"
-        f"   Jami: {A_sotuv + B_sotuv} ta\n"
+        f"   Jami: {A_sotuv + B_sotuv} ta\n\n"
+        f"🏪 Ombor qoldig'i:\n"
+        f"{ombor}"
     )
     await message.answer(text, reply_markup=reports_menu())
 
@@ -108,8 +118,9 @@ async def oylik_hisobot(message: Message):
     prod_logs = await db.get_production_range(boshliq, oxiri)
     sales_logs = await db.get_sales_range(boshliq, oxiri)
 
-    jami_qolip, A_blok, B_blok = hisobla_production(prod_logs)
+    jami_qolip, A_blok, B_blok, s1, s2, s3 = hisobla_production(prod_logs)
     A_sotuv, B_sotuv = hisobla_sales(sales_logs)
+    ombor = await ombor_holati()
 
     text = (
         f"📊 Oylik hisobot\n"
@@ -117,11 +128,14 @@ async def oylik_hisobot(message: Message):
         f"━━━━━━━━━━━━━━━━\n\n"
         f"🏭 Ishlab chiqarish:\n"
         f"   Jami qolip: {jami_qolip} ta\n"
+        f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n"
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n\n"
         f"💰 Sotuv:\n"
         f"   A blok: {A_sotuv} ta\n"
         f"   B blok: {B_sotuv} ta\n"
-        f"   Jami: {A_sotuv + B_sotuv} ta\n"
+        f"   Jami: {A_sotuv + B_sotuv} ta\n\n"
+        f"🏪 Ombor qoldig'i:\n"
+        f"{ombor}"
     )
     await message.answer(text, reply_markup=reports_menu())
