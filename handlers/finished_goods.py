@@ -53,6 +53,11 @@ async def tayyor_qoldiq(message: Message):
 
 @router.message(F.text == "✏️ Dastlabki qoldiqni kiritish")
 async def dastlabki_qoldiq(message: Message, state: FSMContext):
+    # Faqat superadmin va omborchi
+    user = await db.get_user(message.from_user.id)
+    if not user or user["rol"] not in ["superadmin", "omborchi"]:
+        await message.answer("❌ Sizda bu amalni bajarish huquqi yo'q!")
+        return
     await state.set_state(FinishedGoodsState.block_type)
     await message.answer(
         "Qaysi blok uchun qoldiq kiritasiz?",
@@ -68,7 +73,6 @@ async def finished_block_type(message: Message, state: FSMContext):
     await state.update_data(block_type=block_type)
     await state.set_state(FinishedGoodsState.miqdor)
 
-    # Hozirgi qoldiqni ko'rsatamiz
     goods = await db.get_finished_goods()
     joriy = next((g[1] for g in goods if g[0] == block_type), 0)
     await message.answer(
@@ -85,11 +89,28 @@ async def finished_miqdor(message: Message, state: FSMContext):
             raise ValueError
         data = await state.get_data()
         block_type = data["block_type"]
+
+        # Eski qoldiqni olish
+        goods = await db.get_finished_goods()
+        eski_qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
+
         await db.set_finished_goods(block_type, miqdor)
+
+        # Audit log
+        user = await db.get_user(message.from_user.id)
+        await db.add_audit_log(
+            message.from_user.id,
+            user["ism"] if user else "Noma'lum",
+            user["rol"] if user else "-",
+            "Tayyor mahsulot qoldig'i yangilandi",
+            f"{block_type} blok: {eski_qoldiq} → {miqdor} ta"
+        )
+
         await state.clear()
         await message.answer(
             f"✅ {block_type} blok qoldig'i yangilandi!\n"
-            f"Yangi qoldiq: {miqdor} ta",
+            f"   Eski: {eski_qoldiq} ta\n"
+            f"   Yangi: {miqdor} ta",
             reply_markup=finished_menu()
         )
     except ValueError:
