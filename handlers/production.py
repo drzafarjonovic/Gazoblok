@@ -96,17 +96,32 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             await message.answer("❌ Hech qolip kiritilmadi!")
             return
 
+        # ── Minus qoldiq tekshiruvi ──
+        yetishmaydi = await db.check_material_yetarli(jami_qolip)
+        if yetishmaydi:
+            text = (
+                "⛔ Ishlab chiqarish mumkin emas!\n"
+                "Materiallar yetarli emas:\n\n"
+            )
+            text += "\n".join(yetishmaydi)
+            await message.answer(text)
+            return
+
+        # Bloklar hisobi
         A_blok = s1 * 12 + s3 * 11
         B_blok = s2 * 24 + s3 * 2
 
+        # Bazaga yozish
         bugun = str(date.today())
+        user_id = message.from_user.id
         if s1 > 0:
-            await db.add_production_log(bugun, 1, s1)
+            await db.add_production_log(bugun, 1, s1, user_id)
         if s2 > 0:
-            await db.add_production_log(bugun, 2, s2)
+            await db.add_production_log(bugun, 2, s2, user_id)
         if s3 > 0:
-            await db.add_production_log(bugun, 3, s3)
+            await db.add_production_log(bugun, 3, s3, user_id)
 
+        # Xom ashyoni kamaytirish
         formula = await db.get_qolip_formula()
         ogohlantirish = []
         sarflar = []
@@ -137,8 +152,23 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                     ogohlantirish.append(
                         f"⚠️ {nomi} kam qoldi!\n"
                         f"   Qoldiq: {qoldiq_asl:.2f} {asl_birlik}\n"
-                        f"   Minimum: {db.asosiydan_birlikga(s[1], asl_birlik):.2f} {asl_birlik}"
+                        f"   Minimum: "
+                        f"{db.asosiydan_birlikga(s[1], asl_birlik):.2f} {asl_birlik}"
                     )
+
+        # Tayyor mahsulot omboriga qo'shish
+        await db.update_finished_goods("A", A_blok)
+        await db.update_finished_goods("B", B_blok)
+
+        # Audit log
+        user = await db.get_user(user_id)
+        await db.add_audit_log(
+            user_id,
+            user["ism"] if user else "Noma'lum",
+            user["rol"] if user else "-",
+            "Ishlab chiqarish kiritildi",
+            f"Qolip: {jami_qolip} ta | A: {A_blok} ta | B: {B_blok} ta"
+        )
 
         sarflar_text = "\n".join(sarflar)
         text = (
@@ -146,8 +176,8 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             f"📦 Jami qolip: {jami_qolip} ta\n"
             f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n\n"
             f"🧱 Tayyor bloklar:\n"
-            f"   A blok: {A_blok} ta\n"
-            f"   B blok: {B_blok} ta\n\n"
+            f"   A blok: +{A_blok} ta\n"
+            f"   B blok: +{B_blok} ta\n\n"
             f"📉 Sarflangan:\n"
             f"{sarflar_text}"
         )
@@ -157,22 +187,9 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             await message.answer("\n\n".join(ogohlantirish))
 
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 2")
+        await message.answer("❌ Faqat musbat son kiriting!")
 
-@router.message(F.text == "🗑️ Oxirgi yozuvni o'chirish")
-async def oxirgi_production_ochirish(message: Message):
-    natija = await db.delete_last_production()
-    if natija:
-        await message.answer(
-            "✅ Oxirgi ishlab chiqarish yozuvi o'chirildi!",
-            reply_markup=production_menu()
-        )
-    else:
-        await message.answer(
-            "❌ O'chiriladigan yozuv yo'q!",
-            reply_markup=production_menu()
-        )
-
+# ── Bugungi ishlab chiqarish ──
 @router.message(F.text == "📋 Bugungi ishlab chiqarish")
 async def bugungi_production(message: Message):
     bugun = str(date.today())
@@ -204,3 +221,26 @@ async def bugungi_production(message: Message):
         f"   B blok: {B_blok} ta\n"
     )
     await message.answer(text)
+
+# ── Oxirgi yozuvni o'chirish ──
+@router.message(F.text == "🗑️ Oxirgi yozuvni o'chirish")
+async def oxirgi_ochirish(message: Message):
+    user = await db.get_user(message.from_user.id)
+    natija = await db.delete_last_production()
+    if natija:
+        await db.add_audit_log(
+            message.from_user.id,
+            user["ism"] if user else "Noma'lum",
+            user["rol"] if user else "-",
+            "Ishlab chiqarish o'chirildi",
+            "Oxirgi yozuv o'chirildi"
+        )
+        await message.answer(
+            "✅ Oxirgi yozuv o'chirildi!",
+            reply_markup=production_menu()
+        )
+    else:
+        await message.answer(
+            "❌ O'chiriladigan yozuv yo'q!",
+            reply_markup=production_menu()
+    )
