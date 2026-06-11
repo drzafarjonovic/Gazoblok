@@ -43,20 +43,17 @@ async def joriy_qoldiqlar(message: Message):
         material_id = m[0]
         nomi = m[1]
         qoldiq_asosiy = m[2]
-        asosiy_birlik = m[3]
         asl_birlik = m[4]
 
-        # Asl birlikda ko'rsatish
         qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
-
         min_ch = min_map.get(material_id)
+
         if min_ch and qoldiq_asosiy <= min_ch:
             status = "⚠️"
         else:
             status = "✅"
 
         text += f"{status} {nomi}: {qoldiq_asl:.2f} {asl_birlik}\n"
-
         if min_ch:
             min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
             text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
@@ -75,7 +72,8 @@ async def xom_ashyo_kirim(message: Message, state: FSMContext):
 
     text = "📦 Qaysi material keldi?\nRaqamini kiriting:\n\n"
     for m in materials:
-        text += f"{m[0]}. {m[1]} ({m[4]})\n"
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
 
     await state.update_data(materials=materials)
     await state.set_state(WarehouseState.material_id)
@@ -132,14 +130,22 @@ async def kirim_birlik(message: Message, state: FSMContext):
     asl_birlik = data["asl_birlik"]
     joriy_qoldiq_asosiy = data["joriy_qoldiq_asosiy"]
 
-    # Kirimni asosiy birlikka o'tkazamiz
     kirim_asosiy, _ = db.birlikni_asosiyga(miqdor, birlik)
     yangi_qoldiq_asosiy = joriy_qoldiq_asosiy + kirim_asosiy
 
     await db.update_material_qoldiq(data["material_id"], yangi_qoldiq_asosiy)
-    await state.clear()
 
-    # Asl birlikda ko'rsatamiz
+    # Audit log
+    user = await db.get_user(message.from_user.id)
+    await db.add_audit_log(
+        message.from_user.id,
+        user["ism"] if user else "Noma'lum",
+        user["rol"] if user else "-",
+        "Xom ashyo kirim",
+        f"{data['material_nomi']}: +{miqdor} {birlik}"
+    )
+
+    await state.clear()
     yangi_qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq_asosiy, asl_birlik)
 
     await message.answer(
