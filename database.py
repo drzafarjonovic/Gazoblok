@@ -43,7 +43,10 @@ ROLLAR = {
 
 # ── Ulanish ──
 async def get_conn():
-    return await asyncpg.connect(DATABASE_URL)
+    return await asyncpg.connect(
+        DATABASE_URL,
+        statement_cache_size=0
+    )
 
 # ── Database init ──
 async def init_db():
