@@ -61,7 +61,6 @@ async def tayyor_holati():
 async def hisobot_matni(boshliq, oxiri, sarlavha):
     prod_logs = await db.get_production_range(boshliq, oxiri)
     sales_logs = await db.get_sales_range(boshliq, oxiri)
-
     jami_qolip, A_blok, B_blok, s1, s2, s3 = hisobla_production(prod_logs)
     A_sotuv, B_sotuv = hisobla_sales(sales_logs)
     ombor = await ombor_holati()
@@ -73,7 +72,7 @@ async def hisobot_matni(boshliq, oxiri, sarlavha):
         f"━━━━━━━━━━━━━━━━\n\n"
         f"🏭 Ishlab chiqarish:\n"
         f"   Jami qolip: {jami_qolip} ta\n"
-        f"   Shablon 1: {s1} | 2: {s2} | 3: {s3}\n"
+        f"   Sh1: {s1} | Sh2: {s2} | Sh3: {s3}\n"
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n\n"
         f"💰 Sotuv:\n"
@@ -126,11 +125,11 @@ async def excel_hisobot(message: Message):
     sales_logs = await db.get_sales_range(boshliq, oxiri)
     materials = await db.get_materials()
     goods = await db.get_finished_goods()
+    formula = await db.get_qolip_formula()
 
     wb = openpyxl.Workbook()
 
-    # Sarlavha uslubi
-    sarlavha_font = Font(bold=True, size=12, color="FFFFFF")
+    sarlavha_font = Font(bold=True, size=11, color="FFFFFF")
     sarlavha_fill = PatternFill("solid", fgColor="2E75B6")
     markaz = Alignment(horizontal="center")
 
@@ -141,11 +140,13 @@ async def excel_hisobot(message: Message):
             cell.fill = sarlavha_fill
             cell.alignment = markaz
 
-    # ── 1. Ishlab chiqarish varag'i ──
+    # ── 1. Ishlab chiqarish ──
     ws1 = wb.active
     ws1.title = "Ishlab chiqarish"
-    sarlavha_qo(ws1, 1, ["Sana", "Shablon 1", "Shablon 2", "Shablon 3",
-                          "Jami qolip", "A blok", "B blok"])
+    sarlavha_qo(ws1, 1, [
+        "Sana", "Shablon 1", "Shablon 2",
+        "Shablon 3", "Jami qolip", "A blok", "B blok"
+    ])
     ws1.column_dimensions["A"].width = 14
 
     sanalar = {}
@@ -155,13 +156,13 @@ async def excel_hisobot(message: Message):
             sanalar[sana] = [0, 0, 0]
         sanalar[sana][log[1] - 1] += log[2]
 
-    for i, (sana, counts) in enumerate(sorted(sanalar.items()), 2):
+    for sana, counts in sorted(sanalar.items()):
         s1, s2, s3 = counts
         A = s1 * 12 + s3 * 11
         B = s2 * 24 + s3 * 2
         ws1.append([sana, s1, s2, s3, s1+s2+s3, A, B])
 
-    # ── 2. Sotuv varag'i ──
+    # ── 2. Sotuv ──
     ws2 = wb.create_sheet("Sotuv")
     sarlavha_qo(ws2, 1, ["Sana", "A blok", "B blok", "Jami"])
     ws2.column_dimensions["A"].width = 14
@@ -178,31 +179,26 @@ async def excel_hisobot(message: Message):
         B = counts.get("B", 0)
         ws2.append([sana, A, B, A + B])
 
-    # ── 3. Ombor qoldiqlari varag'i ──
+    # ── 3. Ombor qoldiqlari ──
     ws3 = wb.create_sheet("Ombor qoldiqlari")
     sarlavha_qo(ws3, 1, ["Material", "Qoldiq", "Birlik"])
     ws3.column_dimensions["A"].width = 20
-    ws3.column_dimensions["B"].width = 14
 
     for m in materials:
         qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
         ws3.append([m[1], round(qoldiq_asl, 2), m[4]])
 
     ws3.append([])
-    ws3.append(["Tayyor mahsulot", "", ""])
+    ws3.append(["── Tayyor mahsulot ──", "", ""])
     for g in goods:
         ws3.append([f"{g[0]} blok", g[1], "ta"])
 
-    # ── 4. Xom ashyo sarfi varag'i ──
+    # ── 4. Xom ashyo sarfi ──
     ws4 = wb.create_sheet("Xom ashyo sarfi")
     sarlavha_qo(ws4, 1, ["Material", "Sarflangan", "Birlik"])
     ws4.column_dimensions["A"].width = 20
 
-    formula = await db.get_qolip_formula()
-    jami_qolip = sum(
-        log[2] for log in prod_logs
-    )
-
+    jami_qolip = sum(log[2] for log in prod_logs)
     for f in formula:
         nomi = f[0]
         miqdor_asosiy = f[6]
@@ -211,7 +207,25 @@ async def excel_hisobot(message: Message):
         ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
         ws4.append([nomi, round(ketgan_asl, 2), asl_birlik])
 
-    # Faylni xotiraga yozamiz
+    # ── 5. Audit log ──
+    ws5 = wb.create_sheet("Audit log")
+    sarlavha_qo(ws5, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Amal", "Tafsilot"])
+    ws5.column_dimensions["A"].width = 18
+    ws5.column_dimensions["B"].width = 15
+    ws5.column_dimensions["D"].width = 25
+    ws5.column_dimensions["E"].width = 35
+
+    audit_logs = await db.get_audit_log(200)
+    for log in audit_logs:
+        vaqt = log["vaqt"].strftime("%d.%m.%Y %H:%M")
+        ws5.append([
+            vaqt,
+            log["ism"],
+            log["rol"],
+            log["amal"],
+            log["tafsilot"]
+        ])
+
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -222,7 +236,7 @@ async def excel_hisobot(message: Message):
         caption=f"📥 Excel hisobot\n📅 {boshliq} — {oxiri}"
     )
 
-# ── Avtomatik kunlik hisobot (tashqaridan chaqiriladi) ──
+# ── Avtomatik hisobot ──
 async def avtomatik_hisobot(bot, chat_id):
     bugun = str(date.today())
     text = await hisobot_matni(bugun, bugun, "🔔 Avtomatik kunlik hisobot")
