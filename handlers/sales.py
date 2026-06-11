@@ -41,11 +41,14 @@ async def sotuv(message: Message):
 
 @router.message(F.text == "💰 Sotuv kiritish")
 async def sotuv_kiritish(message: Message, state: FSMContext):
+    # Tayyor mahsulot qoldiqlarini ko'rsatish
+    goods = await db.get_finished_goods()
+    text = "Qaysi blok sotildi?\n\n"
+    text += "📦 Joriy tayyor mahsulot:\n"
+    for g in goods:
+        text += f"   {g[0]} blok: {g[1]} ta\n"
     await state.set_state(SalesState.block_type)
-    await message.answer(
-        "Qaysi blok sotildi?",
-        reply_markup=block_type_menu()
-    )
+    await message.answer(text, reply_markup=block_type_menu())
 
 @router.message(SalesState.block_type)
 async def sotuv_block_type(message: Message, state: FSMContext):
@@ -55,8 +58,13 @@ async def sotuv_block_type(message: Message, state: FSMContext):
     block_type = "A" if "A blok" in message.text else "B"
     await state.update_data(block_type=block_type)
     await state.set_state(SalesState.miqdor)
+
+    # Mavjud qoldiqni ko'rsatish
+    goods = await db.get_finished_goods()
+    qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
     await message.answer(
-        f"{'A' if block_type == 'A' else 'B'} blokdan nechta sotildi?\n"
+        f"{block_type} blokdan nechta sotildi?\n"
+        f"Mavjud: {qoldiq} ta\n"
         f"Misol: 100"
     )
 
@@ -69,20 +77,55 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
         data = await state.get_data()
         block_type = data["block_type"]
         bugun = str(date.today())
-        await db.add_sales_log(bugun, block_type, miqdor)
+        user_id = message.from_user.id
+
+        # Sotuv + tayyor ombordan ayirish
+        muvaffaqiyat, xabar = await db.add_sales_log(
+            bugun, block_type, miqdor, user_id
+        )
+
+        if not muvaffaqiyat:
+            await state.clear()
+            await message.answer(xabar, reply_markup=sales_menu())
+            return
+
+        # Audit log
+        user = await db.get_user(user_id)
+        await db.add_audit_log(
+            user_id,
+            user["ism"] if user else "Noma'lum",
+            user["rol"] if user else "-",
+            "Sotuv kiritildi",
+            f"{block_type} blok: {miqdor} ta sotildi"
+        )
+
+        # Yangilangan qoldiq
+        goods = await db.get_finished_goods()
+        yangi_qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
+
         await state.clear()
         await message.answer(
             f"✅ Sotuv kiritildi!\n\n"
-            f"🧱 {block_type} blok: {miqdor} ta sotildi",
+            f"🧱 {block_type} blok: {miqdor} ta sotildi\n"
+            f"📦 Qoldi: {yangi_qoldiq} ta",
             reply_markup=sales_menu()
         )
     except ValueError:
         await message.answer("❌ Faqat musbat son kiriting! Misol: 100")
 
+# ── Oxirgi sotuvni o'chirish ──
 @router.message(F.text == "🗑️ Oxirgi sotuvni o'chirish")
 async def oxirgi_sotuv_ochirish(message: Message):
+    user = await db.get_user(message.from_user.id)
     natija = await db.delete_last_sale()
     if natija:
+        await db.add_audit_log(
+            message.from_user.id,
+            user["ism"] if user else "Noma'lum",
+            user["rol"] if user else "-",
+            "Sotuv o'chirildi",
+            "Oxirgi sotuv yozuvi o'chirildi"
+        )
         await message.answer(
             "✅ Oxirgi sotuv yozuvi o'chirildi!",
             reply_markup=sales_menu()
@@ -93,6 +136,7 @@ async def oxirgi_sotuv_ochirish(message: Message):
             reply_markup=sales_menu()
         )
 
+# ── Bugungi sotuv ──
 @router.message(F.text == "📋 Bugungi sotuv")
 async def bugungi_sotuv(message: Message):
     bugun = str(date.today())
@@ -105,10 +149,18 @@ async def bugungi_sotuv(message: Message):
     A_jami = sum(log[1] for log in logs if log[0] == "A")
     B_jami = sum(log[1] for log in logs if log[0] == "B")
 
+    # Tayyor mahsulot qoldig'i
+    goods = await db.get_finished_goods()
+    qoldiq_text = ""
+    for g in goods:
+        qoldiq_text += f"   {g[0]} blok: {g[1]} ta\n"
+
     text = (
         f"📋 Bugungi sotuv:\n\n"
         f"🧱 A blok: {A_jami} ta\n"
         f"🧱 B blok: {B_jami} ta\n"
-        f"📦 Jami: {A_jami + B_jami} ta"
+        f"📦 Jami sotildi: {A_jami + B_jami} ta\n\n"
+        f"🏬 Tayyor mahsulot qoldig'i:\n"
+        f"{qoldiq_text}"
     )
     await message.answer(text, reply_markup=sales_menu())
