@@ -72,26 +72,28 @@ def get_menu(rol):
             ],
             resize_keyboard=True
         )
-    else:
-        return ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="🏠 Asosiy menyu")]],
-            resize_keyboard=True
-        )
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🏠 Asosiy menyu")]],
+        resize_keyboard=True
+    )
 
-# ── Middleware — Rol tekshiruvi ──
+# ── Middleware ──
 class RolMiddleware(BaseMiddleware):
-    # Bu bo'limlarga kirish uchun rol tekshiriladi
     ROL_HUQUQLAR = {
         "🏭 Ishlab chiqarish": ["superadmin", "ishchi"],
         "🏭 Ishlab chiqarishni kiritish": ["superadmin", "ishchi"],
         "📋 Bugungi ishlab chiqarish": ["superadmin", "ishchi", "direktor"],
+        "🗑️ Oxirgi yozuvni o'chirish": ["superadmin"],
         "💰 Sotuv": ["superadmin", "sotuvchi"],
         "💰 Sotuv kiritish": ["superadmin", "sotuvchi"],
         "📋 Bugungi sotuv": ["superadmin", "sotuvchi", "direktor"],
+        "🗑️ Oxirgi sotuvni o'chirish": ["superadmin"],
         "🏪 Ombor": ["superadmin", "omborchi", "ishchi", "direktor", "hisobchi"],
         "📥 Xom ashyo kirim": ["superadmin", "omborchi"],
         "🏪 Joriy qoldiqlar": ["superadmin", "omborchi", "direktor", "hisobchi", "ishchi"],
         "🏬 Tayyor mahsulot": ["superadmin", "omborchi", "sotuvchi", "direktor", "hisobchi"],
+        "📦 Tayyor mahsulot qoldig'i": ["superadmin", "omborchi", "sotuvchi", "direktor", "hisobchi"],
+        "✏️ Dastlabki qoldiqni kiritish": ["superadmin", "omborchi"],
         "📊 Hisobot": ["superadmin", "direktor", "hisobchi"],
         "📊 Kunlik hisobot": ["superadmin", "direktor", "hisobchi"],
         "📊 Haftalik hisobot": ["superadmin", "direktor", "hisobchi"],
@@ -99,6 +101,11 @@ class RolMiddleware(BaseMiddleware):
         "📥 Excel hisobot": ["superadmin", "direktor", "hisobchi"],
         "⚙️ Sozlamalar": ["superadmin"],
         "👥 Foydalanuvchilar": ["superadmin"],
+        "👥 Foydalanuvchilar ro'yxati": ["superadmin"],
+        "➕ Foydalanuvchi qo'shish": ["superadmin"],
+        "✏️ Rol o'zgartirish": ["superadmin"],
+        "🗑️ Foydalanuvchini o'chirish": ["superadmin"],
+        "📋 Audit log": ["superadmin"],
     }
 
     async def __call__(
@@ -110,13 +117,11 @@ class RolMiddleware(BaseMiddleware):
         if not isinstance(event, Message):
             return await handler(event, data)
 
-        # /start buyrug'i har doim o'tadi
         if event.text and event.text.startswith("/start"):
             return await handler(event, data)
 
         user = await db.get_user(event.from_user.id)
 
-        # Ro'yxatdan o'tmagan
         if not user:
             await event.answer(
                 "⛔ Siz ro'yxatdan o'tmagansiz!\n\n"
@@ -126,21 +131,27 @@ class RolMiddleware(BaseMiddleware):
             )
             return
 
-        # Faol emas
         if not user["faol"]:
-            await event.answer("⛔ Sizning hisobingiz bloklangan. Adminга murojaat qiling.")
+            await event.answer(
+                "⛔ Sizning hisobingiz bloklangan!\n"
+                "Adminга murojaat qiling."
+            )
             return
 
-        # Huquq tekshiruvi
         if event.text in self.ROL_HUQUQLAR:
             ruxsat_rollar = self.ROL_HUQUQLAR[event.text]
             if user["rol"] not in ruxsat_rollar:
-                await event.answer("⛔ Sizda bu bo'limga kirish huquqi yo'q!")
+                await event.answer(
+                    "⛔ Sizda bu bo'limga kirish huquqi yo'q!\n"
+                    f"Sizning rol: {db.ROLLAR.get(user['rol'], user['rol'])}"
+                )
                 return
 
+        # User ma'lumotini data ga qo'shamiz
+        data["user"] = user
         return await handler(event, data)
 
-# ── Routerlarni ulash ──
+# ── Routerlar ──
 dp.message.middleware(RolMiddleware())
 dp.include_router(users.router)
 dp.include_router(settings.router)
@@ -157,13 +168,13 @@ async def start(message: Message):
     ism = message.from_user.full_name
     username = message.from_user.username
 
-    # Birinchi superadmin
     superadmin_bor = await db.superadmin_bormi()
     if not superadmin_bor:
         await db.add_user(user_id, ism, username, "superadmin")
         await db.set_bot_setting("admin_chat_id", str(user_id))
         await message.answer(
-            f"👑 Siz Super Admin sifatida ro'yxatdan o'tdingiz!\n\n"
+            f"👑 Salom, {ism}!\n"
+            f"Siz Super Admin sifatida ro'yxatdan o'tdingiz!\n\n"
             f"🧱 GazoBot — Gazoblok ishlab chiqarish boshqaruvi",
             reply_markup=get_menu("superadmin")
         )
@@ -171,7 +182,6 @@ async def start(message: Message):
 
     user = await db.get_user(user_id)
     if not user:
-        # Superadminga xabar
         admin_id = await db.get_bot_setting("admin_chat_id")
         if admin_id:
             try:
@@ -187,16 +197,23 @@ async def start(message: Message):
             except Exception:
                 pass
         await message.answer(
-            f"⛔ Siz ro'yxatdan o'tmagansiz!\n\n"
-            f"Admin sizni tizimga qo'shishini kuting.\n"
+            f"⛔ Salom, {ism}!\n\n"
+            f"Siz hali ro'yxatdan o'tmagansiz.\n"
+            f"Admin sizni tizimga qo'shishini kuting.\n\n"
             f"Sizning ID: <code>{user_id}</code>",
             parse_mode="HTML"
         )
         return
 
+    if not user["faol"]:
+        await message.answer("⛔ Sizning hisobingiz bloklangan. Adminга murojaat qiling.")
+        return
+
+    rol_nomi = db.ROLLAR.get(user["rol"], user["rol"])
     await message.answer(
         f"Salom, {ism}! 👋\n"
-        f"Rol: {db.ROLLAR.get(user['rol'], user['rol'])}",
+        f"Rol: {rol_nomi}\n\n"
+        f"Quyidagi bo'limlardan birini tanlang:",
         reply_markup=get_menu(user["rol"])
     )
 
@@ -204,7 +221,7 @@ async def start(message: Message):
 @dp.message(lambda m: m.text == "🏠 Asosiy menyu")
 async def asosiy(message: Message):
     user = await db.get_user(message.from_user.id)
-    if user:
+    if user and user["faol"]:
         await message.answer(
             "🏠 Asosiy menyu:",
             reply_markup=get_menu(user["rol"])
@@ -212,22 +229,26 @@ async def asosiy(message: Message):
 
 # ── Avtomatik hisobot scheduler ──
 async def hisobot_scheduler():
+    last_sent_minute = -1
     while True:
         try:
             from datetime import datetime
+            hozir = datetime.now()
             vaqt = await db.get_bot_setting("hisobot_vaqti")
             if vaqt:
-                hozir = datetime.now()
                 parts = vaqt.split(":")
                 soat = int(parts[0])
                 daqiqa = int(parts[1])
-                if hozir.hour == soat and hozir.minute == daqiqa:
+                joriy_minut = hozir.hour * 60 + hozir.minute
+                kerakli_minut = soat * 60 + daqiqa
+                if joriy_minut == kerakli_minut and last_sent_minute != joriy_minut:
                     chat_id = await db.get_bot_setting("admin_chat_id")
                     if chat_id:
                         await reports.avtomatik_hisobot(bot, int(chat_id))
-        except Exception:
-            pass
-        await asyncio.sleep(60)
+                    last_sent_minute = joriy_minut
+        except Exception as e:
+            print(f"Scheduler xato: {e}")
+        await asyncio.sleep(30)
 
 async def main():
     await db.init_db()
