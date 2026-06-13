@@ -6,6 +6,13 @@ import database as db
 
 router = Router()
 
+# Qo'llab-quvvatlanadigan birliklar
+BARCHA_BIRLIKLAR = [
+    "tonna", "ton", "t", "kg", "g", "gramm", "gr", "mg",
+    "quintal", "sentner", "meshok", "qop",
+    "litr", "l", "ml", "millilitr", "m3", "kubometr", "kub", "dl", "cl"
+]
+
 class WarehouseState(StatesGroup):
     material_id = State()
     miqdor = State()
@@ -30,65 +37,90 @@ async def ombor(message: Message):
 
 @router.message(F.text == "🏪 Joriy qoldiqlar")
 async def joriy_qoldiqlar(message: Message):
-    materials = await db.get_materials()
-    if not materials:
-        await message.answer("❌ Hali material kiritilmagan!")
-        return
+    try:
+        materials = await db.get_materials()
+        if not materials:
+            await message.answer(
+                "❌ Hali material kiritilmagan!",
+                reply_markup=warehouse_menu()
+            )
+            return
 
-    settings = await db.get_settings()
-    min_map = {s[3]: s[1] for s in settings}
+        all_settings = await db.get_settings()
+        # s[3] = material_id, s[1] = min_chegara (asosiy birlikda)
+        min_map = {s[3]: s[1] for s in all_settings}
 
-    text = "🏪 Joriy qoldiqlar:\n\n"
-    for m in materials:
-        material_id = m[0]
-        nomi = m[1]
-        qoldiq_asosiy = m[2]
-        asl_birlik = m[4]
+        text = "🏪 Joriy qoldiqlar:\n\n"
+        for m in materials:
+            material_id = m[0]
+            nomi = m[1]
+            qoldiq_asosiy = m[2]
+            asosiy_birlik = m[3]
+            asl_birlik = m[4]
 
-        qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
-        min_ch = min_map.get(material_id)
+            qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
+            min_ch = min_map.get(material_id)
 
-        if min_ch and qoldiq_asosiy <= min_ch:
-            status = "⚠️"
-        else:
-            status = "✅"
+            if min_ch and qoldiq_asosiy <= min_ch:
+                status = "⚠️"
+            else:
+                status = "✅"
 
-        text += f"{status} {nomi}: {qoldiq_asl:.2f} {asl_birlik}\n"
-        if min_ch:
-            min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
-            text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
+            text += f"{status} {nomi}: {qoldiq_asl:.2f} {asl_birlik}\n"
 
-    await message.answer(text)
+            if min_ch and min_ch > 0:
+                min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
+                text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
+
+        await message.answer(text, reply_markup=warehouse_menu())
+    except Exception as e:
+        await message.answer(
+            f"❌ Xatolik: {str(e)}",
+            reply_markup=warehouse_menu()
+        )
 
 @router.message(F.text == "📥 Xom ashyo kirim")
 async def xom_ashyo_kirim(message: Message, state: FSMContext):
-    materials = await db.get_materials()
-    if not materials:
-        await message.answer(
-            "❌ Avval material qo'shing!\n"
-            "⚙️ Sozlamalar → ➕ Material qo'shish"
+    try:
+        await state.clear()
+        materials = await db.get_materials()
+        if not materials:
+            await message.answer(
+                "❌ Avval material qo'shing!\n"
+                "⚙️ Sozlamalar → ➕ Material qo'shish",
+                reply_markup=warehouse_menu()
+            )
+            return
+
+        text = "📦 Qaysi material keldi?\nRaqamini kiriting:\n\n"
+        for m in materials:
+            qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+            text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
+
+        await state.update_data(
+            materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials]
         )
-        return
-
-    text = "📦 Qaysi material keldi?\nRaqamini kiriting:\n\n"
-    for m in materials:
-        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
-        text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
-
-    await state.update_data(materials=materials)
-    await state.set_state(WarehouseState.material_id)
-    await message.answer(text)
+        await state.set_state(WarehouseState.material_id)
+        await message.answer(text)
+    except Exception as e:
+        await message.answer(
+            f"❌ Xatolik: {str(e)}",
+            reply_markup=warehouse_menu()
+        )
 
 @router.message(WarehouseState.material_id)
 async def kirim_material(message: Message, state: FSMContext):
     try:
-        material_id = int(message.text)
+        material_id = int(message.text.strip())
         data = await state.get_data()
         materials = data["materials"]
         material = next((m for m in materials if m[0] == material_id), None)
 
         if not material:
-            await message.answer("❌ Bunday raqam yo'q! Qaytadan kiriting.")
+            await message.answer(
+                "❌ Bunday raqam yo'q!\n"
+                "Qaytadan kiriting:"
+            )
             return
 
         await state.update_data(
@@ -104,6 +136,12 @@ async def kirim_material(message: Message, state: FSMContext):
         )
     except ValueError:
         await message.answer("❌ Faqat raqam kiriting! Misol: 1")
+    except Exception as e:
+        await state.clear()
+        await message.answer(
+            f"❌ Xatolik: {str(e)}",
+            reply_markup=warehouse_menu()
+        )
 
 @router.message(WarehouseState.miqdor)
 async def kirim_miqdor(message: Message, state: FSMContext):
@@ -114,44 +152,84 @@ async def kirim_miqdor(message: Message, state: FSMContext):
         await state.update_data(miqdor=miqdor)
         await state.set_state(WarehouseState.birlik)
         data = await state.get_data()
+        asl_birlik = data["asl_birlik"]
+
+        # Qo'llab-quvvatlanadigan birliklarni ko'rsatamiz
+        og_birliklar = "tonna, kg, g, gramm, mg, meshok"
+        hajm_birliklar = "litr, ml, m3, kubometr"
+
         await message.answer(
             f"Birligini kiriting:\n"
-            f"Misol: tonna, kg, g, litr, ml\n"
-            f"(Odatdagi: {data['asl_birlik']})"
+            f"(Ombordagi birlik: {asl_birlik})\n\n"
+            f"Og'irlik: {og_birliklar}\n"
+            f"Hajm: {hajm_birliklar}"
         )
     except ValueError:
         await message.answer("❌ Faqat musbat son kiriting! Misol: 10")
+    except Exception as e:
+        await state.clear()
+        await message.answer(
+            f"❌ Xatolik: {str(e)}",
+            reply_markup=warehouse_menu()
+        )
 
 @router.message(WarehouseState.birlik)
 async def kirim_birlik(message: Message, state: FSMContext):
-    data = await state.get_data()
-    birlik = message.text.strip()
-    miqdor = data["miqdor"]
-    asl_birlik = data["asl_birlik"]
-    joriy_qoldiq_asosiy = data["joriy_qoldiq_asosiy"]
+    try:
+        birlik = message.text.strip().lower()
 
-    kirim_asosiy, _ = db.birlikni_asosiyga(miqdor, birlik)
-    yangi_qoldiq_asosiy = joriy_qoldiq_asosiy + kirim_asosiy
+        # Birlik to'g'riligini tekshirish
+        if birlik not in BARCHA_BIRLIKLAR:
+            await message.answer(
+                f"❌ '{birlik}' birlik tanilmadi!\n\n"
+                f"Og'irlik uchun: tonna, kg, g, gramm, mg, meshok\n"
+                f"Hajm uchun: litr, ml, m3, kubometr\n\n"
+                f"Qaytadan kiriting:"
+            )
+            return
 
-    await db.update_material_qoldiq(data["material_id"], yangi_qoldiq_asosiy)
+        data = await state.get_data()
+        miqdor = data["miqdor"]
+        asl_birlik = data["asl_birlik"]
+        joriy_qoldiq_asosiy = data["joriy_qoldiq_asosiy"]
 
-    # Audit log
-    user = await db.get_user(message.from_user.id)
-    await db.add_audit_log(
-        message.from_user.id,
-        user["ism"] if user else "Noma'lum",
-        user["rol"] if user else "-",
-        "Xom ashyo kirim",
-        f"{data['material_nomi']}: +{miqdor} {birlik}"
-    )
+        # Hozirgi qoldiqni bazadan yangilab olamiz (stale data oldini olish)
+        materials = await db.get_materials()
+        material = next(
+            (m for m in materials if m[0] == data["material_id"]), None
+        )
+        if material:
+            joriy_qoldiq_asosiy = material[2]
 
-    await state.clear()
-    yangi_qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq_asosiy, asl_birlik)
+        # Kirimni asosiy birlikka o'tkazamiz
+        kirim_asosiy, kirim_birlik_asosiy = db.birlikni_asosiyga(miqdor, birlik)
+        yangi_qoldiq_asosiy = joriy_qoldiq_asosiy + kirim_asosiy
 
-    await message.answer(
-        f"✅ Kirim kiritildi!\n\n"
-        f"📦 {data['material_nomi']}\n"
-        f"   Kirim: +{miqdor} {birlik}\n"
-        f"   Yangi qoldiq: {yangi_qoldiq_asl:.2f} {asl_birlik}",
-        reply_markup=warehouse_menu()
+        await db.update_material_qoldiq(data["material_id"], yangi_qoldiq_asosiy)
+
+        # Audit log
+        user = await db.get_user(message.from_user.id)
+        await db.add_audit_log(
+            message.from_user.id,
+            user["ism"] if user else str(message.from_user.id),
+            user["rol"] if user else "-",
+            "Xom ashyo kirim",
+            f"{data['material_nomi']}: +{miqdor} {birlik}"
+        )
+
+        await state.clear()
+
+        yangi_qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq_asosiy, asl_birlik)
+        await message.answer(
+            f"✅ Kirim kiritildi!\n\n"
+            f"📦 {data['material_nomi']}\n"
+            f"   Kirim: +{miqdor} {birlik}\n"
+            f"   Yangi qoldiq: {yangi_qoldiq_asl:.2f} {asl_birlik}",
+            reply_markup=warehouse_menu()
+        )
+    except Exception as e:
+        await state.clear()
+        await message.answer(
+            f"❌ Xatolik: {str(e)}",
+            reply_markup=warehouse_menu()
         )
