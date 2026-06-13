@@ -49,7 +49,7 @@ async def production_kiritish(message: Message, state: FSMContext):
 @router.message(ProductionState.shablon1)
 async def shablon1_kiritish(message: Message, state: FSMContext):
     try:
-        soni = int(message.text)
+        soni = int(message.text.strip())
         if soni < 0:
             raise ValueError
         await state.update_data(shablon1=soni)
@@ -65,7 +65,7 @@ async def shablon1_kiritish(message: Message, state: FSMContext):
 @router.message(ProductionState.shablon2)
 async def shablon2_kiritish(message: Message, state: FSMContext):
     try:
-        soni = int(message.text)
+        soni = int(message.text.strip())
         if soni < 0:
             raise ValueError
         await state.update_data(shablon2=soni)
@@ -81,37 +81,38 @@ async def shablon2_kiritish(message: Message, state: FSMContext):
 @router.message(ProductionState.shablon3)
 async def shablon3_kiritish(message: Message, state: FSMContext):
     try:
-        soni = int(message.text)
+        soni = int(message.text.strip())
         if soni < 0:
             raise ValueError
-        data = await state.get_data()
-        await state.clear()
 
-        s1 = data["shablon1"]
-        s2 = data["shablon2"]
+        data = await state.get_data()
+        s1 = data.get("shablon1", 0)
+        s2 = data.get("shablon2", 0)
         s3 = soni
         jami_qolip = s1 + s2 + s3
 
         if jami_qolip == 0:
-            await message.answer("❌ Hech qolip kiritilmadi!")
+            await state.clear()
+            await message.answer(
+                "❌ Hech qolip kiritilmadi!",
+                reply_markup=production_menu()
+            )
             return
 
-        # ── Minus qoldiq tekshiruvi ──
+        # ── Avval material tekshiruvi (to'liq jami_qolip bilan) ──
         yetishmaydi = await db.check_material_yetarli(jami_qolip)
         if yetishmaydi:
-            text = (
-                "⛔ Ishlab chiqarish mumkin emas!\n"
-                "Materiallar yetarli emas:\n\n"
-            )
+            await state.clear()
+            text = "⛔ Ishlab chiqarish mumkin emas!\nMateriallar yetarli emas:\n\n"
             text += "\n".join(yetishmaydi)
-            await message.answer(text)
+            await message.answer(text, reply_markup=production_menu())
             return
 
-        # Bloklar hisobi
+        # ── Bloklar hisobi ──
         A_blok = s1 * 12 + s3 * 11
         B_blok = s2 * 24 + s3 * 2
 
-        # Bazaga yozish
+        # ── Bazaga yozish ──
         bugun = str(date.today())
         user_id = message.from_user.id
         if s1 > 0:
@@ -121,7 +122,7 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
         if s3 > 0:
             await db.add_production_log(bugun, 3, s3, user_id)
 
-        # Xom ashyoni kamaytirish
+        # ── Xom ashyoni kamaytirish ──
         formula = await db.get_qolip_formula()
         ogohlantirish = []
         sarflar = []
@@ -134,7 +135,7 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             material_id = f[5]
 
             ketgan_asosiy = miqdor_asosiy * jami_qolip
-            yangi_qoldiq = max(0, qoldiq_asosiy - ketgan_asosiy)
+            yangi_qoldiq = max(0.0, qoldiq_asosiy - ketgan_asosiy)
 
             await db.update_material_qoldiq(material_id, yangi_qoldiq)
 
@@ -146,29 +147,35 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                 f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
             )
 
-            settings = await db.get_settings()
-            for s in settings:
+            # Minimum chegara tekshirish
+            all_settings = await db.get_settings()
+            for s in all_settings:
                 if s[3] == material_id and yangi_qoldiq <= s[1]:
+                    min_asl = db.asosiydan_birlikga(s[1], asl_birlik)
                     ogohlantirish.append(
                         f"⚠️ {nomi} kam qoldi!\n"
                         f"   Qoldiq: {qoldiq_asl:.2f} {asl_birlik}\n"
-                        f"   Minimum: "
-                        f"{db.asosiydan_birlikga(s[1], asl_birlik):.2f} {asl_birlik}"
+                        f"   Minimum: {min_asl:.2f} {asl_birlik}"
                     )
 
-        # Tayyor mahsulot omboriga qo'shish
-        await db.update_finished_goods("A", A_blok)
-        await db.update_finished_goods("B", B_blok)
+        # ── Tayyor mahsulot omboriga qo'shish ──
+        if A_blok > 0:
+            await db.update_finished_goods("A", A_blok)
+        if B_blok > 0:
+            await db.update_finished_goods("B", B_blok)
 
-        # Audit log
+        # ── Audit log ──
         user = await db.get_user(user_id)
         await db.add_audit_log(
             user_id,
-            user["ism"] if user else "Noma'lum",
+            user["ism"] if user else str(user_id),
             user["rol"] if user else "-",
             "Ishlab chiqarish kiritildi",
             f"Qolip: {jami_qolip} ta | A: {A_blok} ta | B: {B_blok} ta"
         )
+
+        # ── State tozalash ──
+        await state.clear()
 
         sarflar_text = "\n".join(sarflar)
         text = (
@@ -187,7 +194,14 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             await message.answer("\n\n".join(ogohlantirish))
 
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting!")
+        await message.answer("❌ Faqat musbat son kiriting! Misol: 2")
+    except Exception as e:
+        await state.clear()
+        await message.answer(
+            f"❌ Xatolik yuz berdi: {str(e)}\n"
+            "Qaytadan urinib ko'ring.",
+            reply_markup=production_menu()
+        )
 
 # ── Bugungi ishlab chiqarish ──
 @router.message(F.text == "📋 Bugungi ishlab chiqarish")
@@ -196,7 +210,10 @@ async def bugungi_production(message: Message):
     logs = await db.get_production_by_date(bugun)
 
     if not logs:
-        await message.answer("📋 Bugun hali ishlab chiqarish kiritilmagan.")
+        await message.answer(
+            "📋 Bugun hali ishlab chiqarish kiritilmagan.",
+            reply_markup=production_menu()
+        )
         return
 
     s1 = s2 = s3 = 0
@@ -220,27 +237,33 @@ async def bugungi_production(message: Message):
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n"
     )
-    await message.answer(text)
+    await message.answer(text, reply_markup=production_menu())
 
 # ── Oxirgi yozuvni o'chirish ──
 @router.message(F.text == "🗑️ Oxirgi yozuvni o'chirish")
 async def oxirgi_ochirish(message: Message):
-    user = await db.get_user(message.from_user.id)
-    natija = await db.delete_last_production()
-    if natija:
-        await db.add_audit_log(
-            message.from_user.id,
-            user["ism"] if user else "Noma'lum",
-            user["rol"] if user else "-",
-            "Ishlab chiqarish o'chirildi",
-            "Oxirgi yozuv o'chirildi"
-        )
+    try:
+        user = await db.get_user(message.from_user.id)
+        natija = await db.delete_last_production()
+        if natija:
+            await db.add_audit_log(
+                message.from_user.id,
+                user["ism"] if user else str(message.from_user.id),
+                user["rol"] if user else "-",
+                "Ishlab chiqarish o'chirildi",
+                "Oxirgi yozuv o'chirildi"
+            )
+            await message.answer(
+                "✅ Oxirgi yozuv o'chirildi!",
+                reply_markup=production_menu()
+            )
+        else:
+            await message.answer(
+                "❌ O'chiriladigan yozuv yo'q!",
+                reply_markup=production_menu()
+            )
+    except Exception as e:
         await message.answer(
-            "✅ Oxirgi yozuv o'chirildi!",
-            reply_markup=production_menu()
-        )
-    else:
-        await message.answer(
-            "❌ O'chiriladigan yozuv yo'q!",
+            f"❌ Xatolik: {str(e)}",
             reply_markup=production_menu()
     )
