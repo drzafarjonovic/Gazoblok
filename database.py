@@ -489,21 +489,6 @@ async def clear_qolip_formula():
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM qolip_formula")
 
-async def get_settings():
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT
-                s.id,
-                s.min_chegara,
-                m.nomi,
-                m.id
-            FROM settings s
-            JOIN materials m
-                ON m.id = s.material_id
-            ORDER BY m.nomi
-        """)
-        return [tuple(r) for r in rows]
 # ── Material tekshiruvi ──
 async def check_material_yetarli(jami_qolip):
     formula = await get_qolip_formula()
@@ -560,57 +545,6 @@ async def get_material_chiqim_by_material(material_nomi, boshliq, oxiri):
         """, material_nomi, boshliq, oxiri)
         return [dict(r) for r in rows]
 
-# ── Tayyor mahsulotlar ──
-
-async def update_finished_goods(block_type, quantity):
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO finished_goods (block_type, qoldiq)
-            VALUES ($1, $2)
-            ON CONFLICT (block_type)
-            DO UPDATE SET qoldiq = finished_goods.qoldiq + $2
-        """, block_type, quantity)
-
-
-async def get_finished_goods():
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT block_type, qoldiq
-            FROM finished_goods
-            ORDER BY block_type
-        """)
-
-        return [tuple(r) for r in rows]
-
-# ── Tayyor mahsulotlar ──
-
-async def update_finished_goods(block_type, quantity):
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO finished_goods (block_type, qoldiq)
-            VALUES ($1, $2)
-            ON CONFLICT (block_type)
-            DO UPDATE SET qoldiq = finished_goods.qoldiq + $2
-        """, block_type, quantity)
-
-
-async def get_finished_goods():
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT block_type, qoldiq
-            FROM finished_goods
-            ORDER BY block_type
-        """)
-
-        return [tuple(r) for r in rows]
 # ── Ishlab chiqarish ──
 async def add_production_log(sana, shablon, qolip_soni, user_id=None):
     pool = await get_pool()
@@ -621,18 +555,6 @@ async def add_production_log(sana, shablon, qolip_soni, user_id=None):
         """, sana, shablon, qolip_soni, user_id)
         return row["id"]
 
-async def get_production_by_date(sana):
-    pool = await get_pool()
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT shablon, qolip_soni
-            FROM production_log
-            WHERE sana = $1
-            ORDER BY id
-        """, sana)
-
-        return [tuple(r) for r in rows]
 async def delete_last_production_with_restore():
     """Oxirgi ishlab chiqarishni o'chirib, materiallarni omborga qaytaradi"""
     pool = await get_pool()
@@ -656,4 +578,263 @@ async def delete_last_production_with_restore():
         """, prod_id)
 
         # Bloklar hisobi (tayyor ombordan ayirish)
-  
+        if shablon == 1:
+            A_blok = qolip_soni * 12
+            B_blok = 0
+        elif shablon == 2:
+            A_blok = 0
+            B_blok = qolip_soni * 24
+        else:
+            A_blok = qolip_soni * 11
+            B_blok = qolip_soni * 2
+
+        # Tayyor ombordan ayirish
+        if A_blok > 0:
+            await conn.execute("""
+                UPDATE finished_goods
+                SET qoldiq = GREATEST(0, qoldiq - $1)
+                WHERE block_type='A'
+            """, A_blok)
+        if B_blok > 0:
+            await conn.execute("""
+                UPDATE finished_goods
+                SET qoldiq = GREATEST(0, qoldiq - $1)
+                WHERE block_type='B'
+            """, B_blok)
+
+        # Materiallarni omborga qaytarish
+        qaytarilgan = []
+        for ch in chiqim_logs:
+            material_id = ch["material_id"]
+            ketgan = ch["ketgan_miqdor"]
+            nomi = ch["material_nomi"]
+            birlik = ch["birlik"]
+
+            await conn.execute("""
+                UPDATE materials SET qoldiq = qoldiq + $1 WHERE id = $2
+            """, ketgan, material_id)
+
+            asl_birlik_row = await conn.fetchrow(
+                "SELECT asl_birlik FROM materials WHERE id=$1", material_id
+            )
+            if asl_birlik_row:
+                asl_birlik = asl_birlik_row["asl_birlik"]
+                qaytarilgan_asl = asosiydan_birlikga(ketgan, asl_birlik)
+                qaytarilgan.append(
+                    f"   {nomi}: +{qaytarilgan_asl:.2f} {asl_birlik}"
+                )
+
+        # Chiqim loglarini o'chirish
+        await conn.execute(
+            "DELETE FROM material_chiqim_log WHERE production_log_id=$1", prod_id
+        )
+        # Ishlab chiqarish yozuvini o'chirish
+        await conn.execute(
+            "DELETE FROM production_log WHERE id=$1", prod_id
+        )
+
+        tafsilot = f"Shablon {shablon}, {qolip_soni} qolip o'chirildi"
+        if qaytarilgan:
+            tafsilot += "\nOmborga qaytarildi:\n" + "\n".join(qaytarilgan)
+        else:
+            tafsilot += "\n(Chiqim tarixi topilmadi, materiallar qaytarilmadi)"
+
+        return True, tafsilot
+
+async def get_production_by_date(sana):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT shablon, qolip_soni FROM production_log WHERE sana=$1", sana
+        )
+        return [tuple(r) for r in rows]
+
+async def get_production_range(boshliq, oxiri):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT sana, shablon, qolip_soni
+            FROM production_log
+            WHERE sana BETWEEN $1 AND $2
+            ORDER BY sana
+        """, boshliq, oxiri)
+        return [tuple(r) for r in rows]
+
+async def get_production_detail_range(boshliq, oxiri):
+    """Foydalanuvchi bilan to'liq ishlab chiqarish tarixi"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT p.sana, p.shablon, p.qolip_soni,
+                   u.ism as user_ism, u.rol as user_rol,
+                   p.vaqt
+            FROM production_log p
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.sana BETWEEN $1 AND $2
+            ORDER BY p.vaqt DESC
+        """, boshliq, oxiri)
+        return [dict(r) for r in rows]
+
+# ── Sotuv ──
+async def add_sales_log(sana, block_type, miqdor, user_id=None):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT qoldiq FROM finished_goods WHERE block_type=$1", block_type
+        )
+        if not row:
+            return False, "❌ Blok turi topilmadi!"
+        joriy_qoldiq = row["qoldiq"]
+        if joriy_qoldiq < miqdor:
+            return False, (
+                f"❌ Tayyor mahsulot yetarli emas!\n"
+                f"   {block_type} blok: bor {joriy_qoldiq} ta, "
+                f"kerak {miqdor} ta"
+            )
+        await conn.execute(
+            "INSERT INTO sales_log (sana,block_type,miqdor,user_id) VALUES ($1,$2,$3,$4)",
+            sana, block_type, miqdor, user_id
+        )
+        await conn.execute(
+            "UPDATE finished_goods SET qoldiq=qoldiq-$1 WHERE block_type=$2",
+            miqdor, block_type
+        )
+        return True, "✅ Sotuv kiritildi!"
+
+async def delete_last_sale():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, block_type, miqdor FROM sales_log ORDER BY id DESC LIMIT 1"
+        )
+        if row:
+            await conn.execute("DELETE FROM sales_log WHERE id=$1", row["id"])
+            await conn.execute(
+                "UPDATE finished_goods SET qoldiq=qoldiq+$1 WHERE block_type=$2",
+                row["miqdor"], row["block_type"]
+            )
+            return True
+        return False
+
+async def get_sales_by_date(sana):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT block_type, miqdor FROM sales_log WHERE sana=$1", sana
+        )
+        return [tuple(r) for r in rows]
+
+async def get_sales_range(boshliq, oxiri):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT sana, block_type, miqdor
+            FROM sales_log
+            WHERE sana BETWEEN $1 AND $2
+            ORDER BY sana
+        """, boshliq, oxiri)
+        return [tuple(r) for r in rows]
+
+async def get_sales_detail_range(boshliq, oxiri):
+    """Foydalanuvchi bilan to'liq sotuv tarixi"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT s.sana, s.block_type, s.miqdor,
+                   u.ism as user_ism, u.rol as user_rol,
+                   s.vaqt
+            FROM sales_log s
+            LEFT JOIN users u ON s.user_id = u.id
+            WHERE s.sana BETWEEN $1 AND $2
+            ORDER BY s.vaqt DESC
+        """, boshliq, oxiri)
+        return [dict(r) for r in rows]
+
+# ── Tayyor mahsulot ──
+async def get_finished_goods():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT block_type, qoldiq FROM finished_goods ORDER BY block_type"
+        )
+        return [tuple(r) for r in rows]
+
+async def set_finished_goods(block_type, qoldiq):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE finished_goods SET qoldiq=$1 WHERE block_type=$2",
+            qoldiq, block_type
+        )
+
+async def update_finished_goods(block_type, delta):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE finished_goods SET qoldiq=GREATEST(0,qoldiq+$1) WHERE block_type=$2",
+            delta, block_type
+        )
+
+# ── Inventarizatsiya ──
+async def add_inventarizatsiya(sana, block_type, bot_hisob, real_hisob, izoh, user_id):
+    farq = real_hisob - bot_hisob
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO inventarizatsiya
+            (sana, block_type, bot_hisob, real_hisob, farq, izoh, user_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """, sana, block_type, bot_hisob, real_hisob, farq, izoh, user_id)
+        # Real hisobni bot ga ham kiritish
+        await conn.execute(
+            "UPDATE finished_goods SET qoldiq=$1 WHERE block_type=$2",
+            real_hisob, block_type
+        )
+    return farq
+
+async def get_inventarizatsiya_tarixi(limit=20):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT i.*, u.ism as user_ism
+            FROM inventarizatsiya i
+            LEFT JOIN users u ON i.user_id = u.id
+            ORDER BY i.vaqt DESC LIMIT $1
+        """, limit)
+        return [dict(r) for r in rows]
+
+# ── Bot sozlamalari ──
+async def get_bot_setting(kalit):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT qiymat FROM bot_settings WHERE kalit=$1", kalit
+        )
+        return row["qiymat"] if row else None
+
+async def set_bot_setting(kalit, qiymat):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO bot_settings (kalit, qiymat) VALUES ($1,$2)
+            ON CONFLICT (kalit) DO UPDATE SET qiymat=$2
+        """, kalit, qiymat)
+
+# ── Sozlamalar ──
+async def get_settings():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT m.nomi, s.min_chegara, m.birlik, m.id, m.asl_birlik
+            FROM settings s
+            JOIN materials m ON s.material_id = m.id
+        """)
+        return [tuple(r) for r in rows]
+
+async def set_min_chegara(material_id, min_chegara):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO settings (material_id, min_chegara) VALUES ($1,$2)
+            ON CONFLICT (material_id) DO UPDATE SET min_chegara=$2
+        """, material_id, min_chegara)
