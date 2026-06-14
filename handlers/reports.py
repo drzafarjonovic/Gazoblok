@@ -1,10 +1,13 @@
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
-from datetime import timedelta
+from datetime import timedelta, timezone
 import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 import database as db
+
+# GMT+5 timezone
+TOSHKENT_TZ = timezone(timedelta(hours=5))
 
 router = Router()
 
@@ -136,7 +139,14 @@ async def tafsilotli_hisobot(message: Message):
         if prod_detail:
             for p in prod_detail[:10]:
                 vaqt = p["vaqt"]
-                vaqt_str = vaqt.strftime("%d.%m %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+                # PostgreSQL vaqtini GMT+5 ga o'girish
+                if hasattr(vaqt, "strftime"):
+                    # Agar vaqt naive bo'lsa (timezone yo'q), GMT+0 deb hisoblab GMT+5 ga o'giramiz
+                    if vaqt.tzinfo is None:
+                        vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+                    vaqt_str = vaqt.strftime("%d.%m %H:%M")
+                else:
+                    vaqt_str = str(vaqt)[:16]
                 shablon_nomi = {1: "A(12ta)", 2: "B(24ta)", 3: "11A+2B"}.get(p["shablon"], "?")
                 text += (
                     f"   {vaqt_str} | {p.get('user_ism') or 'Noma lum'}\n"
@@ -150,7 +160,13 @@ async def tafsilotli_hisobot(message: Message):
         if sales_detail:
             for s in sales_detail[:10]:
                 vaqt = s["vaqt"]
-                vaqt_str = vaqt.strftime("%d.%m %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+                # PostgreSQL vaqtini GMT+5 ga o'girish
+                if hasattr(vaqt, "strftime"):
+                    if vaqt.tzinfo is None:
+                        vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+                    vaqt_str = vaqt.strftime("%d.%m %H:%M")
+                else:
+                    vaqt_str = str(vaqt)[:16]
                 text += (
                     f"   {vaqt_str} | {s.get('user_ism') or 'Noma lum'}\n"
                     f"   {s['block_type']} blok: {s['miqdor']} ta\n"
@@ -233,7 +249,13 @@ async def excel_hisobot(message: Message):
         ws2.column_dimensions["B"].width = 16
         for p in prod_detail:
             vaqt = p["vaqt"]
-            vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+            # GMT+5 ga o'girish
+            if hasattr(vaqt, "strftime"):
+                if vaqt.tzinfo is None:
+                    vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+                vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M")
+            else:
+                vaqt_str = str(vaqt)[:16]
             shablon = p["shablon"]
             qolip = p["qolip_soni"]
             A = qolip * 12 if shablon == 1 else (qolip * 11 if shablon == 3 else 0)
@@ -262,7 +284,13 @@ async def excel_hisobot(message: Message):
         ws4.column_dimensions["B"].width = 16
         for s in sales_detail:
             vaqt = s["vaqt"]
-            vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+            # GMT+5 ga o'girish
+            if hasattr(vaqt, "strftime"):
+                if vaqt.tzinfo is None:
+                    vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+                vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M")
+            else:
+                vaqt_str = str(vaqt)[:16]
             ws4.append([vaqt_str, s["user_ism"] or "Noma'lum", s["user_rol"] or "-", s["block_type"], s["miqdor"]])
 
         # 5. Xom ashyo sarfi
@@ -295,7 +323,13 @@ async def excel_hisobot(message: Message):
         ws7.column_dimensions["E"].width = 40
         for log in audit_logs:
             vaqt = log["vaqt"]
-            vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+            # GMT+5 ga o'girish
+            if hasattr(vaqt, "strftime"):
+                if vaqt.tzinfo is None:
+                    vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+                vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M")
+            else:
+                vaqt_str = str(vaqt)[:16]
             ws7.append([vaqt_str, log["ism"] or "", log["rol"] or "", log["amal"] or "", log["tafsilot"] or ""])
 
         buffer = io.BytesIO()

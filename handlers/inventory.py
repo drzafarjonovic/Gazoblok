@@ -2,9 +2,13 @@ from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from datetime import timezone, timedelta
 import database as db
 
 router = Router()
+
+# GMT+5 timezone
+TOSHKENT_TZ = timezone(timedelta(hours=5))
 
 class InventarizatsiyaState(StatesGroup):
     block_type = State()
@@ -132,7 +136,13 @@ async def inv_tarixi(message: Message):
         text = "📋 Inventarizatsiya tarixi:\n\n"
         for log in logs:
             vaqt = log["vaqt"]
-            vaqt_str = vaqt.strftime("%d.%m.%Y") if hasattr(vaqt, "strftime") else str(vaqt)[:10]
+            # GMT+5 ga o'girish
+            if hasattr(vaqt, "strftime"):
+                if vaqt.tzinfo is None:
+                    vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+                vaqt_str = vaqt.strftime("%d.%m.%Y")
+            else:
+                vaqt_str = str(vaqt)[:10]
             farq = log["farq"]
             farq_text = f"+{farq}" if farq > 0 else str(farq)
             text += (
