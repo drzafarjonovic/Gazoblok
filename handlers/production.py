@@ -25,10 +25,7 @@ def production_menu():
 
 @router.message(F.text == "🏭 Ishlab chiqarish")
 async def production(message: Message):
-    await message.answer(
-        "🏭 Ishlab chiqarish bo'limi:",
-        reply_markup=production_menu()
-    )
+    await message.answer("🏭 Ishlab chiqarish bo'limi:", reply_markup=production_menu())
 
 @router.message(F.text == "🏭 Ishlab chiqarishni kiritish")
 async def production_kiritish(message: Message, state: FSMContext):
@@ -93,13 +90,10 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
 
         if jami_qolip == 0:
             await state.clear()
-            await message.answer(
-                "❌ Hech qolip kiritilmadi!",
-                reply_markup=production_menu()
-            )
+            await message.answer("❌ Hech qolip kiritilmadi!", reply_markup=production_menu())
             return
 
-        # ── Avval material tekshiruvi (to'liq jami_qolip bilan) ──
+        # Material tekshiruvi
         yetishmaydi = await db.check_material_yetarli(jami_qolip)
         if yetishmaydi:
             await state.clear()
@@ -108,21 +102,24 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             await message.answer(text, reply_markup=production_menu())
             return
 
-        # ── Bloklar hisobi ──
         A_blok = s1 * 12 + s3 * 11
         B_blok = s2 * 24 + s3 * 2
-
-        # ── Bazaga yozish ──
         bugun = str(date.today())
         user_id = message.from_user.id
-        if s1 > 0:
-            await db.add_production_log(bugun, 1, s1, user_id)
-        if s2 > 0:
-            await db.add_production_log(bugun, 2, s2, user_id)
-        if s3 > 0:
-            await db.add_production_log(bugun, 3, s3, user_id)
 
-        # ── Xom ashyoni kamaytirish ──
+        # Bazaga yozish va ID larini olish
+        prod_ids = []
+        if s1 > 0:
+            pid = await db.add_production_log(bugun, 1, s1, user_id)
+            prod_ids.append((pid, 1, s1))
+        if s2 > 0:
+            pid = await db.add_production_log(bugun, 2, s2, user_id)
+            prod_ids.append((pid, 2, s2))
+        if s3 > 0:
+            pid = await db.add_production_log(bugun, 3, s3, user_id)
+            prod_ids.append((pid, 3, s3))
+
+        # Xom ashyoni kamaytirish va chiqim log
         formula = await db.get_qolip_formula()
         ogohlantirish = []
         sarflar = []
@@ -139,15 +136,21 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
 
             await db.update_material_qoldiq(material_id, yangi_qoldiq)
 
+            # Chiqim logga yozish (har bir production_log uchun)
+            for pid, shablon, qolip_soni in prod_ids:
+                ketgan_bu_log = miqdor_asosiy * qolip_soni
+                await db.add_material_chiqim_log(
+                    pid, material_id, nomi,
+                    ketgan_bu_log, "kg", bugun
+                )
+
             ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
             qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq, asl_birlik)
-
             sarflar.append(
                 f"   {nomi}: -{ketgan_asl:.2f} {asl_birlik} "
                 f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
             )
 
-            # Minimum chegara tekshirish
             all_settings = await db.get_settings()
             for s in all_settings:
                 if s[3] == material_id and yangi_qoldiq <= s[1]:
@@ -158,13 +161,13 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                         f"   Minimum: {min_asl:.2f} {asl_birlik}"
                     )
 
-        # ── Tayyor mahsulot omboriga qo'shish ──
+        # Tayyor mahsulot omboriga qo'shish
         if A_blok > 0:
             await db.update_finished_goods("A", A_blok)
         if B_blok > 0:
             await db.update_finished_goods("B", B_blok)
 
-        # ── Audit log ──
+        # Audit log
         user = await db.get_user(user_id)
         await db.add_audit_log(
             user_id,
@@ -174,7 +177,6 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             f"Qolip: {jami_qolip} ta | A: {A_blok} ta | B: {B_blok} ta"
         )
 
-        # ── State tozalash ──
         await state.clear()
 
         sarflar_text = "\n".join(sarflar)
@@ -185,8 +187,7 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             f"🧱 Tayyor bloklar:\n"
             f"   A blok: +{A_blok} ta\n"
             f"   B blok: +{B_blok} ta\n\n"
-            f"📉 Sarflangan:\n"
-            f"{sarflar_text}"
+            f"📉 Sarflangan:\n{sarflar_text}"
         )
         await message.answer(text, reply_markup=production_menu())
 
@@ -194,41 +195,29 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             await message.answer("\n\n".join(ogohlantirish))
 
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 2")
+        await message.answer("❌ Faqat musbat son kiriting!")
     except Exception as e:
         await state.clear()
         await message.answer(
-            f"❌ Xatolik yuz berdi: {str(e)}\n"
-            "Qaytadan urinib ko'ring.",
+            f"❌ Xatolik: {str(e)}\nQaytadan urinib ko'ring.",
             reply_markup=production_menu()
         )
 
-# ── Bugungi ishlab chiqarish ──
 @router.message(F.text == "📋 Bugungi ishlab chiqarish")
 async def bugungi_production(message: Message):
     bugun = str(date.today())
     logs = await db.get_production_by_date(bugun)
-
     if not logs:
-        await message.answer(
-            "📋 Bugun hali ishlab chiqarish kiritilmagan.",
-            reply_markup=production_menu()
-        )
+        await message.answer("📋 Bugun hali ishlab chiqarish kiritilmagan.", reply_markup=production_menu())
         return
-
     s1 = s2 = s3 = 0
     for log in logs:
-        if log[0] == 1:
-            s1 += log[1]
-        elif log[0] == 2:
-            s2 += log[1]
-        elif log[0] == 3:
-            s3 += log[1]
-
+        if log[0] == 1: s1 += log[1]
+        elif log[0] == 2: s2 += log[1]
+        elif log[0] == 3: s3 += log[1]
     jami_qolip = s1 + s2 + s3
     A_blok = s1 * 12 + s3 * 11
     B_blok = s2 * 24 + s3 * 2
-
     text = (
         f"📋 Bugungi ishlab chiqarish:\n\n"
         f"📦 Jami qolip: {jami_qolip} ta\n"
@@ -239,31 +228,24 @@ async def bugungi_production(message: Message):
     )
     await message.answer(text, reply_markup=production_menu())
 
-# ── Oxirgi yozuvni o'chirish ──
 @router.message(F.text == "🗑️ Oxirgi yozuvni o'chirish")
 async def oxirgi_ochirish(message: Message):
     try:
         user = await db.get_user(message.from_user.id)
-        natija = await db.delete_last_production()
-        if natija:
+        muvaffaqiyat, tafsilot = await db.delete_last_production_with_restore()
+        if muvaffaqiyat:
             await db.add_audit_log(
                 message.from_user.id,
                 user["ism"] if user else str(message.from_user.id),
                 user["rol"] if user else "-",
                 "Ishlab chiqarish o'chirildi",
-                "Oxirgi yozuv o'chirildi"
+                tafsilot
             )
             await message.answer(
-                "✅ Oxirgi yozuv o'chirildi!",
+                f"✅ Oxirgi yozuv o'chirildi!\n\n{tafsilot}",
                 reply_markup=production_menu()
             )
         else:
-            await message.answer(
-                "❌ O'chiriladigan yozuv yo'q!",
-                reply_markup=production_menu()
-            )
+            await message.answer(tafsilot, reply_markup=production_menu())
     except Exception as e:
-        await message.answer(
-            f"❌ Xatolik: {str(e)}",
-            reply_markup=production_menu()
-    )
+        await message.answer(f"❌ Xatolik: {str(e)}", reply_markup=production_menu())
