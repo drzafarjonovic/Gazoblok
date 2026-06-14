@@ -142,7 +142,7 @@ async def tafsilotli_hisobot(message: Message):
                 vaqt_str = vaqt.strftime("%d.%m %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
                 shablon_nomi = {1: "A(12ta)", 2: "B(24ta)", 3: "11A+2B"}.get(p["shablon"], "?")
                 text += (
-                    f"   {vaqt_str} | {p['user_ism'] or 'Noma'lum'}\n"
+                    f"   {vaqt_str} | {p.get('user_ism') or 'Noma lum'}\n"
                     f"   Shablon {p['shablon']}({shablon_nomi}): {p['qolip_soni']} qolip\n"
                 )
         else:
@@ -155,7 +155,7 @@ async def tafsilotli_hisobot(message: Message):
                 vaqt = s["vaqt"]
                 vaqt_str = vaqt.strftime("%d.%m %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
                 text += (
-                    f"   {vaqt_str} | {s['user_ism'] or 'Noma'lum'}\n"
+                    f"   {vaqt_str} | {s.get('user_ism') or 'Noma lum'}\n"
                     f"   {s['block_type']} blok: {s['miqdor']} ta\n"
                 )
         else:
@@ -325,3 +325,4 @@ async def avtomatik_hisobot(bot, chat_id):
         await bot.send_message(chat_id, text)
     except Exception as e:
         print(f"Avtomatik hisobot xatoligi: {e}")
+                          
