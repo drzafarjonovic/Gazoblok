@@ -560,6 +560,32 @@ async def get_material_chiqim_by_material(material_nomi, boshliq, oxiri):
         """, material_nomi, boshliq, oxiri)
         return [dict(r) for r in rows]
 
+# ── Tayyor mahsulotlar ──
+
+async def update_finished_goods(block_type, quantity):
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO finished_goods (block_type, qoldiq)
+            VALUES ($1, $2)
+            ON CONFLICT (block_type)
+            DO UPDATE SET qoldiq = finished_goods.qoldiq + $2
+        """, block_type, quantity)
+
+
+async def get_finished_goods():
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT block_type, qoldiq
+            FROM finished_goods
+            ORDER BY block_type
+        """)
+
+        return [tuple(r) for r in rows]
+        
 # ── Ishlab chiqarish ──
 async def add_production_log(sana, shablon, qolip_soni, user_id=None):
     pool = await get_pool()
