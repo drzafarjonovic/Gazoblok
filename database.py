@@ -596,6 +596,18 @@ async def add_production_log(sana, shablon, qolip_soni, user_id=None):
         """, sana, shablon, qolip_soni, user_id)
         return row["id"]
 
+async def get_production_by_date(sana):
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT shablon, qolip_soni
+            FROM production_log
+            WHERE sana = $1
+            ORDER BY id
+        """, sana)
+
+        return [tuple(r) for r in rows]
 async def delete_last_production_with_restore():
     """Oxirgi ishlab chiqarishni o'chirib, materiallarni omborga qaytaradi"""
     pool = await get_pool()
