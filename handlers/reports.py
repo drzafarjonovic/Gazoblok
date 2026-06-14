@@ -1,6 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.types import BufferedInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
 from datetime import date, timedelta
 import io
 import openpyxl
@@ -15,6 +14,7 @@ def reports_menu():
             [KeyboardButton(text="📊 Kunlik hisobot")],
             [KeyboardButton(text="📊 Haftalik hisobot")],
             [KeyboardButton(text="📊 Oylik hisobot")],
+            [KeyboardButton(text="📊 Tafsilotli hisobot")],
             [KeyboardButton(text="📥 Excel hisobot")],
             [KeyboardButton(text="🏠 Asosiy menyu")],
         ],
@@ -24,14 +24,9 @@ def reports_menu():
 def hisobla_production(logs):
     s1 = s2 = s3 = 0
     for log in logs:
-        shablon = log[1]
-        qolip = log[2]
-        if shablon == 1:
-            s1 += qolip
-        elif shablon == 2:
-            s2 += qolip
-        elif shablon == 3:
-            s3 += qolip
+        if log[1] == 1: s1 += log[2]
+        elif log[1] == 2: s2 += log[2]
+        elif log[1] == 3: s3 += log[2]
     jami_qolip = s1 + s2 + s3
     A_blok = s1 * 12 + s3 * 11
     B_blok = s2 * 24 + s3 * 2
@@ -78,7 +73,6 @@ async def hisobot_matni(boshliq, oxiri, sarlavha):
         A_sotuv, B_sotuv = hisobla_sales(sales_logs)
         ombor = await ombor_holati()
         tayyor = await tayyor_holati()
-
         return (
             f"{sarlavha}\n"
             f"📅 {boshliq} — {oxiri}\n"
@@ -92,53 +86,102 @@ async def hisobot_matni(boshliq, oxiri, sarlavha):
             f"   A blok: {A_sotuv} ta\n"
             f"   B blok: {B_sotuv} ta\n"
             f"   Jami: {A_sotuv + B_sotuv} ta\n\n"
-            f"🏬 Tayyor mahsulot:\n"
-            f"{tayyor}\n"
-            f"🏪 Xom ashyo qoldig'i:\n"
-            f"{ombor}"
+            f"🏬 Tayyor mahsulot:\n{tayyor}\n"
+            f"🏪 Xom ashyo qoldig'i:\n{ombor}"
         )
     except Exception as e:
         return f"❌ Hisobot xatoligi: {str(e)}"
 
 @router.message(F.text == "📊 Hisobot")
 async def hisobot(message: Message):
-    await message.answer(
-        "📊 Hisobotlar:",
-        reply_markup=reports_menu()
-    )
+    await message.answer("📊 Hisobotlar:", reply_markup=reports_menu())
 
 @router.message(F.text == "📊 Kunlik hisobot")
 async def kunlik_hisobot(message: Message):
-    try:
-        bugun = str(date.today())
-        text = await hisobot_matni(bugun, bugun, "📊 Kunlik hisobot")
-        await message.answer(text, reply_markup=reports_menu())
-    except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+    bugun = str(date.today())
+    text = await hisobot_matni(bugun, bugun, "📊 Kunlik hisobot")
+    await message.answer(text, reply_markup=reports_menu())
 
 @router.message(F.text == "📊 Haftalik hisobot")
 async def haftalik_hisobot(message: Message):
-    try:
-        bugun = date.today()
-        boshliq = str(bugun - timedelta(days=7))
-        oxiri = str(bugun)
-        text = await hisobot_matni(boshliq, oxiri, "📊 Haftalik hisobot")
-        await message.answer(text, reply_markup=reports_menu())
-    except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+    bugun = date.today()
+    boshliq = str(bugun - timedelta(days=7))
+    oxiri = str(bugun)
+    text = await hisobot_matni(boshliq, oxiri, "📊 Haftalik hisobot")
+    await message.answer(text, reply_markup=reports_menu())
 
 @router.message(F.text == "📊 Oylik hisobot")
 async def oylik_hisobot(message: Message):
+    bugun = date.today()
+    boshliq = str(bugun.replace(day=1))
+    oxiri = str(bugun)
+    text = await hisobot_matni(boshliq, oxiri, "📊 Oylik hisobot")
+    await message.answer(text, reply_markup=reports_menu())
+
+@router.message(F.text == "📊 Tafsilotli hisobot")
+async def tafsilotli_hisobot(message: Message):
     try:
         bugun = date.today()
         boshliq = str(bugun.replace(day=1))
         oxiri = str(bugun)
-        text = await hisobot_matni(boshliq, oxiri, "📊 Oylik hisobot")
+
+        # Ishlab chiqarish tafsiloti
+        prod_detail = await db.get_production_detail_range(boshliq, oxiri)
+        # Sotuv tafsiloti
+        sales_detail = await db.get_sales_detail_range(boshliq, oxiri)
+        # Xom ashyo sarfi
+        chiqim = await db.get_material_chiqim_range(boshliq, oxiri)
+
+        text = f"📊 Tafsilotli hisobot\n📅 {boshliq} — {oxiri}\n━━━━━━━━━━━━━━━━\n\n"
+
+        # Ishlab chiqarish
+        text += "🏭 ISHLAB CHIQARISH:\n"
+        if prod_detail:
+            for p in prod_detail[:10]:
+                vaqt = p["vaqt"]
+                vaqt_str = vaqt.strftime("%d.%m %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+                shablon_nomi = {1: "A(12ta)", 2: "B(24ta)", 3: "11A+2B"}.get(p["shablon"], "?")
+                text += (
+                    f"   {vaqt_str} | {p['user_ism'] or 'Noma'lum'}\n"
+                    f"   Shablon {p['shablon']}({shablon_nomi}): {p['qolip_soni']} qolip\n"
+                )
+        else:
+            text += "   Ma'lumot yo'q\n"
+
+        # Sotuv
+        text += "\n💰 SOTUV:\n"
+        if sales_detail:
+            for s in sales_detail[:10]:
+                vaqt = s["vaqt"]
+                vaqt_str = vaqt.strftime("%d.%m %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+                text += (
+                    f"   {vaqt_str} | {s['user_ism'] or 'Noma'lum'}\n"
+                    f"   {s['block_type']} blok: {s['miqdor']} ta\n"
+                )
+        else:
+            text += "   Ma'lumot yo'q\n"
+
+        # Xom ashyo sarfi
+        text += "\n📉 XOM ASHYO SARFI:\n"
+        if chiqim:
+            sarfi_dict = {}
+            for ch in chiqim:
+                nomi = ch["material_nomi"]
+                if nomi not in sarfi_dict:
+                    sarfi_dict[nomi] = {"jami": 0, "birlik": ch["birlik"]}
+                sarfi_dict[nomi]["jami"] += float(ch["jami"])
+            for nomi, info in sarfi_dict.items():
+                asl = db.asosiydan_birlikga(info["jami"], info["birlik"])
+                text += f"   {nomi}: {asl:.2f} {info['birlik']}\n"
+        else:
+            text += "   Ma'lumot yo'q\n"
+
+        if len(text) > 4000:
+            text = text[:4000] + "\n..."
         await message.answer(text, reply_markup=reports_menu())
     except Exception as e:
         await message.answer(f"❌ Xatolik: {str(e)}")
 
-# ── Excel hisobot ──
 @router.message(F.text == "📥 Excel hisobot")
 async def excel_hisobot(message: Message):
     try:
@@ -152,9 +195,11 @@ async def excel_hisobot(message: Message):
         goods = await db.get_finished_goods()
         formula = await db.get_qolip_formula()
         audit_logs = await db.get_audit_log(200)
+        prod_detail = await db.get_production_detail_range(boshliq, oxiri)
+        sales_detail = await db.get_sales_detail_range(boshliq, oxiri)
+        chiqim_logs = await db.get_material_chiqim_range(boshliq, oxiri)
 
         wb = openpyxl.Workbook()
-
         sarlavha_font = Font(bold=True, size=11, color="FFFFFF")
         sarlavha_fill = PatternFill("solid", fgColor="2E75B6")
         markaz = Alignment(horizontal="center", vertical="center")
@@ -166,17 +211,11 @@ async def excel_hisobot(message: Message):
                 cell.fill = sarlavha_fill
                 cell.alignment = markaz
 
-        # ── 1. Ishlab chiqarish ──
+        # 1. Ishlab chiqarish xulosasi
         ws1 = wb.active
         ws1.title = "Ishlab chiqarish"
-        sarlavha_qo(ws1, 1, [
-            "Sana", "Shablon 1", "Shablon 2",
-            "Shablon 3", "Jami qolip", "A blok", "B blok"
-        ])
+        sarlavha_qo(ws1, 1, ["Sana", "Shablon 1", "Shablon 2", "Shablon 3", "Jami qolip", "A blok", "B blok"])
         ws1.column_dimensions["A"].width = 14
-        for i in range(2, 8):
-            ws1.column_dimensions[chr(64+i)].width = 12
-
         sanalar = {}
         for log in prod_logs:
             sana = log[0]
@@ -185,88 +224,83 @@ async def excel_hisobot(message: Message):
             idx = log[1] - 1
             if 0 <= idx <= 2:
                 sanalar[sana][idx] += log[2]
-
         for sana, counts in sorted(sanalar.items()):
             s1, s2, s3 = counts
             A = s1 * 12 + s3 * 11
             B = s2 * 24 + s3 * 2
             ws1.append([sana, s1, s2, s3, s1+s2+s3, A, B])
 
-        # ── 2. Sotuv ──
-        ws2 = wb.create_sheet("Sotuv")
-        sarlavha_qo(ws2, 1, ["Sana", "A blok", "B blok", "Jami"])
-        ws2.column_dimensions["A"].width = 14
-        for i in range(2, 5):
-            ws2.column_dimensions[chr(64+i)].width = 12
+        # 2. Ishlab chiqarish tafsiloti (kim kiritdi)
+        ws2 = wb.create_sheet("Ishlab chiqarish (tafsilot)")
+        sarlavha_qo(ws2, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Shablon", "Qolip soni", "A blok", "B blok"])
+        ws2.column_dimensions["A"].width = 18
+        ws2.column_dimensions["B"].width = 16
+        for p in prod_detail:
+            vaqt = p["vaqt"]
+            vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+            shablon = p["shablon"]
+            qolip = p["qolip_soni"]
+            A = qolip * 12 if shablon == 1 else (qolip * 11 if shablon == 3 else 0)
+            B = qolip * 24 if shablon == 2 else (qolip * 2 if shablon == 3 else 0)
+            ws2.append([vaqt_str, p["user_ism"] or "Noma'lum", p["user_rol"] or "-", shablon, qolip, A, B])
 
+        # 3. Sotuv xulosasi
+        ws3 = wb.create_sheet("Sotuv")
+        sarlavha_qo(ws3, 1, ["Sana", "A blok", "B blok", "Jami"])
+        ws3.column_dimensions["A"].width = 14
         sotuv_sanalar = {}
         for log in sales_logs:
             sana = log[0]
             if sana not in sotuv_sanalar:
                 sotuv_sanalar[sana] = {"A": 0, "B": 0}
             sotuv_sanalar[sana][log[1]] += log[2]
-
         for sana, counts in sorted(sotuv_sanalar.items()):
             A = counts.get("A", 0)
             B = counts.get("B", 0)
-            ws2.append([sana, A, B, A + B])
+            ws3.append([sana, A, B, A + B])
 
-        # ── 3. Ombor qoldiqlari ──
-        ws3 = wb.create_sheet("Ombor qoldiqlari")
-        sarlavha_qo(ws3, 1, ["Material", "Qoldiq", "Birlik"])
-        ws3.column_dimensions["A"].width = 20
-        ws3.column_dimensions["B"].width = 14
-        ws3.column_dimensions["C"].width = 12
+        # 4. Sotuv tafsiloti (kim sotdi)
+        ws4 = wb.create_sheet("Sotuv (tafsilot)")
+        sarlavha_qo(ws4, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Blok turi", "Miqdor"])
+        ws4.column_dimensions["A"].width = 18
+        ws4.column_dimensions["B"].width = 16
+        for s in sales_detail:
+            vaqt = s["vaqt"]
+            vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+            ws4.append([vaqt_str, s["user_ism"] or "Noma'lum", s["user_rol"] or "-", s["block_type"], s["miqdor"]])
 
+        # 5. Xom ashyo sarfi
+        ws5 = wb.create_sheet("Xom ashyo sarfi")
+        sarlavha_qo(ws5, 1, ["Sana", "Material", "Ketgan miqdor", "Birlik"])
+        ws5.column_dimensions["A"].width = 14
+        ws5.column_dimensions["B"].width = 20
+        for ch in chiqim_logs:
+            asl = db.asosiydan_birlikga(float(ch["jami"]), ch["birlik"])
+            ws5.append([ch["sana"], ch["material_nomi"], round(asl, 2), ch["birlik"]])
+
+        # 6. Ombor qoldiqlari
+        ws6 = wb.create_sheet("Ombor qoldiqlari")
+        sarlavha_qo(ws6, 1, ["Material", "Qoldiq", "Birlik"])
+        ws6.column_dimensions["A"].width = 20
         for m in materials:
             qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
-            ws3.append([m[1], round(qoldiq_asl, 2), m[4]])
-
-        ws3.append([])
-        ws3.append(["── Tayyor mahsulot ──", "", ""])
+            ws6.append([m[1], round(qoldiq_asl, 2), m[4]])
+        ws6.append([])
+        ws6.append(["── Tayyor mahsulot ──", "", ""])
         for g in goods:
-            ws3.append([f"{g[0]} blok", g[1], "ta"])
+            ws6.append([f"{g[0]} blok", g[1], "ta"])
 
-        # ── 4. Xom ashyo sarfi ──
-        ws4 = wb.create_sheet("Xom ashyo sarfi")
-        sarlavha_qo(ws4, 1, ["Material", "Sarflangan", "Birlik"])
-        ws4.column_dimensions["A"].width = 20
-        ws4.column_dimensions["B"].width = 14
-        ws4.column_dimensions["C"].width = 12
-
-        jami_qolip = sum(log[2] for log in prod_logs)
-        for f in formula:
-            nomi = f[0]
-            miqdor_asosiy = f[6]
-            asl_birlik = f[7]
-            ketgan_asosiy = miqdor_asosiy * jami_qolip
-            ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
-            ws4.append([nomi, round(ketgan_asl, 2), asl_birlik])
-
-        # ── 5. Audit log ──
-        ws5 = wb.create_sheet("Audit log")
-        sarlavha_qo(ws5, 1, [
-            "Vaqt", "Foydalanuvchi", "Rol", "Amal", "Tafsilot"
-        ])
-        ws5.column_dimensions["A"].width = 18
-        ws5.column_dimensions["B"].width = 16
-        ws5.column_dimensions["C"].width = 14
-        ws5.column_dimensions["D"].width = 25
-        ws5.column_dimensions["E"].width = 35
-
+        # 7. Audit log
+        ws7 = wb.create_sheet("Audit log")
+        sarlavha_qo(ws7, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Amal", "Tafsilot"])
+        ws7.column_dimensions["A"].width = 18
+        ws7.column_dimensions["B"].width = 16
+        ws7.column_dimensions["D"].width = 25
+        ws7.column_dimensions["E"].width = 40
         for log in audit_logs:
             vaqt = log["vaqt"]
-            if hasattr(vaqt, "strftime"):
-                vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M")
-            else:
-                vaqt_str = str(vaqt)[:16]
-            ws5.append([
-                vaqt_str,
-                log["ism"] or "",
-                log["rol"] or "",
-                log["amal"] or "",
-                log["tafsilot"] or ""
-            ])
+            vaqt_str = vaqt.strftime("%d.%m.%Y %H:%M") if hasattr(vaqt, "strftime") else str(vaqt)[:16]
+            ws7.append([vaqt_str, log["ism"] or "", log["rol"] or "", log["amal"] or "", log["tafsilot"] or ""])
 
         buffer = io.BytesIO()
         wb.save(buffer)
@@ -276,16 +310,14 @@ async def excel_hisobot(message: Message):
         await message.answer_document(
             BufferedInputFile(buffer.read(), filename=fayl_nomi),
             caption=(
-                f"📥 Excel hisobot\n"
-                f"📅 {boshliq} — {oxiri}\n"
-                f"5 ta varaq: Ishlab chiqarish, Sotuv, "
-                f"Ombor, Xom ashyo sarfi, Audit log"
+                f"📥 Excel hisobot\n📅 {boshliq} — {oxiri}\n"
+                f"7 ta varaq: Ishlab chiqarish, Tafsilot, "
+                f"Sotuv, Sotuv tafsilot, Xom ashyo, Ombor, Audit"
             )
         )
     except Exception as e:
-        await message.answer(f"❌ Excel hisobot xatoligi: {str(e)}")
+        await message.answer(f"❌ Excel xatoligi: {str(e)}")
 
-# ── Avtomatik hisobot ──
 async def avtomatik_hisobot(bot, chat_id):
     try:
         bugun = str(date.today())
