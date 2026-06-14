@@ -8,9 +8,8 @@ import database as db
 router = Router()
 
 class ProductionState(StatesGroup):
-    shablon1 = State()
-    shablon2 = State()
-    shablon3 = State()
+    shablon_tanlash = State()
+    miqdor_kiritish = State()
 
 def production_menu():
     return ReplyKeyboardMarkup(
@@ -23,9 +22,27 @@ def production_menu():
         resize_keyboard=True
     )
 
+def shablon_menu(kiritilganlar):
+    """Kiritilgan shablonlarni ko'rsatib, tugmalar chiqaradi"""
+    s1 = kiritilganlar.get(1, 0)
+    s2 = kiritilganlar.get(2, 0)
+    s3 = kiritilganlar.get(3, 0)
+
+    keyboard = [
+        [KeyboardButton(text=f"📦 Shablon 1 — 12A ({s1} qolip)")],
+        [KeyboardButton(text=f"📦 Shablon 2 — 24B ({s2} qolip)")],
+        [KeyboardButton(text=f"📦 Shablon 3 — 11A+2B ({s3} qolip)")],
+        [KeyboardButton(text="✅ Tayyor — Saqlash")],
+        [KeyboardButton(text="❌ Bekor qilish")],
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
 @router.message(F.text == "🏭 Ishlab chiqarish")
 async def production(message: Message):
-    await message.answer("🏭 Ishlab chiqarish bo'limi:", reply_markup=production_menu())
+    await message.answer(
+        "🏭 Ishlab chiqarish bo'limi:",
+        reply_markup=production_menu()
+    )
 
 @router.message(F.text == "🏭 Ishlab chiqarishni kiritish")
 async def production_kiritish(message: Message, state: FSMContext):
@@ -36,61 +53,46 @@ async def production_kiritish(message: Message, state: FSMContext):
             "⚙️ Sozlamalar → 📋 Qolip formulasi"
         )
         return
-    await state.set_state(ProductionState.shablon1)
+
+    await state.clear()
+    await state.update_data(kiritilganlar={})
+    await state.set_state(ProductionState.shablon_tanlash)
+
     await message.answer(
-        "📦 Shablon 1 (faqat A: 12 ta/qolip)\n"
-        "Nechta qolip quyildi?\n"
-        "Agar yo'q bo'lsa: 0"
+        "📦 Qaysi shablondan nechta qolip quyildi?\n\n"
+        "Shablonni tanlang va miqdor kiriting.\n"
+        "Bir necha shablon kiritsa ham bo'ladi.\n"
+        "Oxirida ✅ Tayyor bosing.",
+        reply_markup=shablon_menu({})
     )
 
-@router.message(ProductionState.shablon1)
-async def shablon1_kiritish(message: Message, state: FSMContext):
-    try:
-        soni = int(message.text.strip())
-        if soni < 0:
-            raise ValueError
-        await state.update_data(shablon1=soni)
-        await state.set_state(ProductionState.shablon2)
+@router.message(ProductionState.shablon_tanlash)
+async def shablon_tanlash(message: Message, state: FSMContext):
+    text = message.text
+
+    if text == "❌ Bekor qilish":
+        await state.clear()
         await message.answer(
-            "📦 Shablon 2 (faqat B: 24 ta/qolip)\n"
-            "Nechta qolip quyildi?\n"
-            "Agar yo'q bo'lsa: 0"
+            "❌ Bekor qilindi.",
+            reply_markup=production_menu()
         )
-    except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 5")
+        return
 
-@router.message(ProductionState.shablon2)
-async def shablon2_kiritish(message: Message, state: FSMContext):
-    try:
-        soni = int(message.text.strip())
-        if soni < 0:
-            raise ValueError
-        await state.update_data(shablon2=soni)
-        await state.set_state(ProductionState.shablon3)
-        await message.answer(
-            "📦 Shablon 3 (aralash: 11A + 2B/qolip)\n"
-            "Nechta qolip quyildi?\n"
-            "Agar yo'q bo'lsa: 0"
-        )
-    except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 3")
-
-@router.message(ProductionState.shablon3)
-async def shablon3_kiritish(message: Message, state: FSMContext):
-    try:
-        soni = int(message.text.strip())
-        if soni < 0:
-            raise ValueError
-
+    if text == "✅ Tayyor — Saqlash":
         data = await state.get_data()
-        s1 = data.get("shablon1", 0)
-        s2 = data.get("shablon2", 0)
-        s3 = soni
+        kiritilganlar = data.get("kiritilganlar", {})
+
+        s1 = kiritilganlar.get(1, 0)
+        s2 = kiritilganlar.get(2, 0)
+        s3 = kiritilganlar.get(3, 0)
         jami_qolip = s1 + s2 + s3
 
         if jami_qolip == 0:
-            await state.clear()
-            await message.answer("❌ Hech qolip kiritilmadi!", reply_markup=production_menu())
+            await message.answer(
+                "❌ Hech qolip kiritilmadi!\n"
+                "Avval shablon tanlang.",
+                reply_markup=shablon_menu({})
+            )
             return
 
         # Material tekshiruvi
@@ -152,7 +154,6 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                 f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
             )
 
-            # Min chegara tekshirish
             min_ch = min_map.get(material_id)
             if min_ch and yangi_qoldiq <= min_ch:
                 min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
@@ -181,7 +182,7 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
         await state.clear()
 
         sarflar_text = "\n".join(sarflar)
-        text = (
+        result = (
             f"✅ Ishlab chiqarish kiritildi!\n\n"
             f"📦 Jami qolip: {jami_qolip} ta\n"
             f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n\n"
@@ -190,35 +191,106 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             f"   B blok: +{B_blok} ta\n\n"
             f"📉 Sarflangan:\n{sarflar_text}"
         )
-        await message.answer(text, reply_markup=production_menu())
+        await message.answer(result, reply_markup=production_menu())
 
         if ogohlantirish:
             await message.answer("\n\n".join(ogohlantirish))
+        return
+
+    # Shablon tanlash
+    if "Shablon 1" in text:
+        shablon = 1
+    elif "Shablon 2" in text:
+        shablon = 2
+    elif "Shablon 3" in text:
+        shablon = 3
+    else:
+        await message.answer(
+            "❌ Tugmalardan birini tanlang!",
+            reply_markup=shablon_menu(
+                (await state.get_data()).get("kiritilganlar", {})
+            )
+        )
+        return
+
+    await state.update_data(tanlangan_shablon=shablon)
+    await state.set_state(ProductionState.miqdor_kiritish)
+
+    shablon_info = {
+        1: "Shablon 1 (faqat A: 12 ta/qolip)",
+        2: "Shablon 2 (faqat B: 24 ta/qolip)",
+        3: "Shablon 3 (aralash: 11A + 2B/qolip)",
+    }
+    data = await state.get_data()
+    joriy = data.get("kiritilganlar", {}).get(shablon, 0)
+
+    await message.answer(
+        f"📦 {shablon_info[shablon]}\n\n"
+        f"Nechta qolip? (Hozir: {joriy} ta)\n"
+        f"Misol: 5"
+    )
+
+@router.message(ProductionState.miqdor_kiritish)
+async def miqdor_kiritish(message: Message, state: FSMContext):
+    try:
+        miqdor = int(message.text.strip())
+        if miqdor < 0:
+            raise ValueError
+
+        data = await state.get_data()
+        shablon = data.get("tanlangan_shablon")
+        kiritilganlar = data.get("kiritilganlar", {})
+
+        if miqdor == 0:
+            # 0 kiritilsa o'chirish
+            kiritilganlar.pop(shablon, None)
+        else:
+            kiritilganlar[shablon] = miqdor
+
+        await state.update_data(kiritilganlar=kiritilganlar)
+        await state.set_state(ProductionState.shablon_tanlash)
+
+        # Joriy holat
+        s1 = kiritilganlar.get(1, 0)
+        s2 = kiritilganlar.get(2, 0)
+        s3 = kiritilganlar.get(3, 0)
+        jami = s1 + s2 + s3
+        A_blok = s1 * 12 + s3 * 11
+        B_blok = s2 * 24 + s3 * 2
+
+        status = (
+            f"📊 Joriy holat:\n"
+            f"   Sh1: {s1} | Sh2: {s2} | Sh3: {s3}\n"
+            f"   Jami qolip: {jami} ta\n"
+            f"   A blok: {A_blok} ta | B blok: {B_blok} ta\n\n"
+            f"Yana shablon qo'shing yoki ✅ Tayyor bosing."
+        )
+        await message.answer(status, reply_markup=shablon_menu(kiritilganlar))
 
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting!")
-    except Exception as e:
-        await state.clear()
-        await message.answer(
-            f"❌ Xatolik: {str(e)}\nQaytadan urinib ko'ring.",
-            reply_markup=production_menu()
-        )
+        await message.answer("❌ Faqat musbat son kiriting! Misol: 5")
 
 @router.message(F.text == "📋 Bugungi ishlab chiqarish")
 async def bugungi_production(message: Message):
     bugun = str(date.today())
     logs = await db.get_production_by_date(bugun)
     if not logs:
-        await message.answer("📋 Bugun hali ishlab chiqarish kiritilmagan.", reply_markup=production_menu())
+        await message.answer(
+            "📋 Bugun hali ishlab chiqarish kiritilmagan.",
+            reply_markup=production_menu()
+        )
         return
+
     s1 = s2 = s3 = 0
     for log in logs:
         if log[0] == 1: s1 += log[1]
         elif log[0] == 2: s2 += log[1]
         elif log[0] == 3: s3 += log[1]
+
     jami_qolip = s1 + s2 + s3
     A_blok = s1 * 12 + s3 * 11
     B_blok = s2 * 24 + s3 * 2
+
     text = (
         f"📋 Bugungi ishlab chiqarish:\n\n"
         f"📦 Jami qolip: {jami_qolip} ta\n"
@@ -249,4 +321,7 @@ async def oxirgi_ochirish(message: Message):
         else:
             await message.answer(tafsilot, reply_markup=production_menu())
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}", reply_markup=production_menu())
+        await message.answer(
+            f"❌ Xatolik: {str(e)}",
+            reply_markup=production_menu()
+        )
