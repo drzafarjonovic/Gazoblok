@@ -249,3 +249,4 @@ async def oxirgi_ochirish(message: Message):
             await message.answer(tafsilot, reply_markup=production_menu())
     except Exception as e:
         await message.answer(f"❌ Xatolik: {str(e)}", reply_markup=production_menu())
+        
