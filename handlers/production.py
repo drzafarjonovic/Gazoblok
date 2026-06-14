@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import date
 import database as db
 
 router = Router()
@@ -106,7 +105,7 @@ async def shablon_tanlash(message: Message, state: FSMContext):
 
         A_blok = s1 * 12 + s3 * 11
         B_blok = s2 * 24 + s3 * 2
-        bugun = str(date.today())
+        bugun = db.bugungi_sana()
         user_id = message.from_user.id
 
         # Bazaga yozish
@@ -272,7 +271,7 @@ async def miqdor_kiritish(message: Message, state: FSMContext):
 
 @router.message(F.text == "📋 Bugungi ishlab chiqarish")
 async def bugungi_production(message: Message):
-    bugun = str(date.today())
+    bugun = db.bugungi_sana()
     logs = await db.get_production_by_date(bugun)
     if not logs:
         await message.answer(

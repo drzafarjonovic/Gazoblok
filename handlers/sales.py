@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import date
 import database as db
 
 router = Router()
@@ -80,7 +79,7 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
             raise ValueError
         data = await state.get_data()
         block_type = data["block_type"]
-        bugun = str(date.today())
+        bugun = db.bugungi_sana()
         user_id = message.from_user.id
 
         muvaffaqiyat, xabar = await db.add_sales_log(
@@ -156,7 +155,7 @@ async def oxirgi_sotuv_ochirish(message: Message):
 @router.message(F.text == "📋 Bugungi sotuv")
 async def bugungi_sotuv(message: Message):
     try:
-        bugun = str(date.today())
+        bugun = db.bugungi_sana()
         logs = await db.get_sales_by_date(bugun)
 
         if not logs:

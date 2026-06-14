@@ -2,7 +2,6 @@ from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import date
 import database as db
 
 router = Router()
@@ -95,7 +94,7 @@ async def inv_izoh(message: Message, state: FSMContext):
         real_hisob = data["real_hisob"]
 
         farq = await db.add_inventarizatsiya(
-            str(date.today()), block_type,
+            db.bugungi_sana(), block_type,
             bot_hisob, real_hisob, izoh,
             message.from_user.id
         )

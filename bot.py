@@ -216,8 +216,8 @@ async def hisobot_scheduler():
     last_sent_minute = -1
     while True:
         try:
-            from datetime import datetime
-            hozir = datetime.now()
+            # GMT+5 (Toshkent) vaqtini ishlatamiz
+            hozir = db.hozirgi_vaqt()
             vaqt = await db.get_bot_setting("hisobot_vaqti")
             if vaqt:
                 parts = vaqt.split(":")

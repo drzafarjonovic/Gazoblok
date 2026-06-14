@@ -1,8 +1,19 @@
 import asyncpg
 import os
-from datetime import datetime
+from datetime import datetime, date, timezone, timedelta
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# ── Timezone (GMT+5 Toshkent) ──
+TOSHKENT_TZ = timezone(timedelta(hours=5))
+
+def hozirgi_vaqt():
+    """GMT+5 bo'yicha hozirgi vaqt (timezone aware)"""
+    return datetime.now(TOSHKENT_TZ)
+
+def bugungi_sana():
+    """GMT+5 bo'yicha bugungi sana (date object)"""
+    return hozirgi_vaqt().date()
 
 # ── Birlik konversiyasi ──
 BIRLIK_KG = {
@@ -515,15 +526,20 @@ async def check_material_yetarli(jami_qolip):
 # ── Xom ashyo chiqim log ──
 async def add_material_chiqim_log(production_log_id, material_id, material_nomi,
                                    ketgan_miqdor, birlik, sana):
+    """sana: date object yoki str"""
+    sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO material_chiqim_log
             (production_log_id, material_id, material_nomi, ketgan_miqdor, birlik, sana)
             VALUES ($1, $2, $3, $4, $5, $6)
-        """, production_log_id, material_id, material_nomi, ketgan_miqdor, birlik, sana)
+        """, production_log_id, material_id, material_nomi, ketgan_miqdor, birlik, sana_str)
 
 async def get_material_chiqim_range(boshliq, oxiri):
+    """boshliq, oxiri: date object yoki str"""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -532,7 +548,7 @@ async def get_material_chiqim_range(boshliq, oxiri):
             WHERE sana BETWEEN $1 AND $2
             GROUP BY material_nomi, birlik, sana
             ORDER BY sana
-        """, boshliq, oxiri)
+        """, boshliq_str, oxiri_str)
         return [dict(r) for r in rows]
 
 async def get_material_chiqim_by_material(material_nomi, boshliq, oxiri):
@@ -549,12 +565,15 @@ async def get_material_chiqim_by_material(material_nomi, boshliq, oxiri):
 
 # ── Ishlab chiqarish ──
 async def add_production_log(sana, shablon, qolip_soni, user_id=None):
+    """sana: date object yoki str"""
+    # Date object bo'lsa, str ga o'zgartirish
+    sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("""
             INSERT INTO production_log (sana, shablon, qolip_soni, user_id)
             VALUES ($1, $2, $3, $4) RETURNING id
-        """, sana, shablon, qolip_soni, user_id)
+        """, sana_str, shablon, qolip_soni, user_id)
         return row["id"]
 
 async def delete_last_production_with_restore():
@@ -671,14 +690,19 @@ async def delete_last_production_with_restore():
         return True, tafsilot
 
 async def get_production_by_date(sana):
+    """sana: date object yoki str"""
+    sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT shablon, qolip_soni FROM production_log WHERE sana=$1", sana
+            "SELECT shablon, qolip_soni FROM production_log WHERE sana=$1", sana_str
         )
         return [tuple(r) for r in rows]
 
 async def get_production_range(boshliq, oxiri):
+    """boshliq, oxiri: date object yoki str"""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -686,11 +710,13 @@ async def get_production_range(boshliq, oxiri):
             FROM production_log
             WHERE sana BETWEEN $1 AND $2
             ORDER BY sana
-        """, boshliq, oxiri)
+        """, boshliq_str, oxiri_str)
         return [tuple(r) for r in rows]
 
 async def get_production_detail_range(boshliq, oxiri):
     """Foydalanuvchi bilan to'liq ishlab chiqarish tarixi"""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -701,11 +727,13 @@ async def get_production_detail_range(boshliq, oxiri):
             LEFT JOIN users u ON p.user_id = u.id
             WHERE p.sana BETWEEN $1 AND $2
             ORDER BY p.vaqt DESC
-        """, boshliq, oxiri)
+        """, boshliq_str, oxiri_str)
         return [dict(r) for r in rows]
 
 # ── Sotuv ──
 async def add_sales_log(sana, block_type, miqdor, user_id=None):
+    """sana: date object yoki str"""
+    sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -722,7 +750,7 @@ async def add_sales_log(sana, block_type, miqdor, user_id=None):
             )
         await conn.execute(
             "INSERT INTO sales_log (sana,block_type,miqdor,user_id) VALUES ($1,$2,$3,$4)",
-            sana, block_type, miqdor, user_id
+            sana_str, block_type, miqdor, user_id
         )
         await conn.execute(
             "UPDATE finished_goods SET qoldiq=qoldiq-$1 WHERE block_type=$2",
@@ -746,14 +774,19 @@ async def delete_last_sale():
         return False
 
 async def get_sales_by_date(sana):
+    """sana: date object yoki str"""
+    sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT block_type, miqdor FROM sales_log WHERE sana=$1", sana
+            "SELECT block_type, miqdor FROM sales_log WHERE sana=$1", sana_str
         )
         return [tuple(r) for r in rows]
 
 async def get_sales_range(boshliq, oxiri):
+    """boshliq, oxiri: date object yoki str"""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -761,11 +794,13 @@ async def get_sales_range(boshliq, oxiri):
             FROM sales_log
             WHERE sana BETWEEN $1 AND $2
             ORDER BY sana
-        """, boshliq, oxiri)
+        """, boshliq_str, oxiri_str)
         return [tuple(r) for r in rows]
 
 async def get_sales_detail_range(boshliq, oxiri):
     """Foydalanuvchi bilan to'liq sotuv tarixi"""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -776,7 +811,7 @@ async def get_sales_detail_range(boshliq, oxiri):
             LEFT JOIN users u ON s.user_id = u.id
             WHERE s.sana BETWEEN $1 AND $2
             ORDER BY s.vaqt DESC
-        """, boshliq, oxiri)
+        """, boshliq_str, oxiri_str)
         return [dict(r) for r in rows]
 
 # ── Tayyor mahsulot ──
@@ -806,6 +841,8 @@ async def update_finished_goods(block_type, delta):
 
 # ── Inventarizatsiya ──
 async def add_inventarizatsiya(sana, block_type, bot_hisob, real_hisob, izoh, user_id):
+    """sana: date object yoki str"""
+    sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     farq = real_hisob - bot_hisob
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -813,7 +850,7 @@ async def add_inventarizatsiya(sana, block_type, bot_hisob, real_hisob, izoh, us
             INSERT INTO inventarizatsiya
             (sana, block_type, bot_hisob, real_hisob, farq, izoh, user_id)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-        """, sana, block_type, bot_hisob, real_hisob, farq, izoh, user_id)
+        """, sana_str, block_type, bot_hisob, real_hisob, farq, izoh, user_id)
         # Real hisobni bot ga ham kiritish
         await conn.execute(
             "UPDATE finished_goods SET qoldiq=$1 WHERE block_type=$2",

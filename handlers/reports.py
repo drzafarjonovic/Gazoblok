@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
-from datetime import date, timedelta
+from datetime import timedelta
 import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -98,41 +98,38 @@ async def hisobot(message: Message):
 
 @router.message(F.text == "📊 Kunlik hisobot")
 async def kunlik_hisobot(message: Message):
-    bugun = str(date.today())
+    bugun = db.bugungi_sana()
     text = await hisobot_matni(bugun, bugun, "📊 Kunlik hisobot")
     await message.answer(text, reply_markup=reports_menu())
 
 @router.message(F.text == "📊 Haftalik hisobot")
 async def haftalik_hisobot(message: Message):
-    bugun = date.today()
-    boshliq = str(bugun - timedelta(days=7))
-    oxiri = str(bugun)
-    text = await hisobot_matni(boshliq, oxiri, "📊 Haftalik hisobot")
+    bugun = db.bugungi_sana()
+    boshliq = bugun - timedelta(days=7)
+    text = await hisobot_matni(boshliq, bugun, "📊 Haftalik hisobot")
     await message.answer(text, reply_markup=reports_menu())
 
 @router.message(F.text == "📊 Oylik hisobot")
 async def oylik_hisobot(message: Message):
-    bugun = date.today()
-    boshliq = str(bugun.replace(day=1))
-    oxiri = str(bugun)
-    text = await hisobot_matni(boshliq, oxiri, "📊 Oylik hisobot")
+    bugun = db.bugungi_sana()
+    boshliq = bugun.replace(day=1)
+    text = await hisobot_matni(boshliq, bugun, "📊 Oylik hisobot")
     await message.answer(text, reply_markup=reports_menu())
 
 @router.message(F.text == "📊 Tafsilotli hisobot")
 async def tafsilotli_hisobot(message: Message):
     try:
-        bugun = date.today()
-        boshliq = str(bugun.replace(day=1))
-        oxiri = str(bugun)
+        bugun = db.bugungi_sana()
+        boshliq = bugun.replace(day=1)
 
         # Ishlab chiqarish tafsiloti
-        prod_detail = await db.get_production_detail_range(boshliq, oxiri)
+        prod_detail = await db.get_production_detail_range(boshliq, bugun)
         # Sotuv tafsiloti
-        sales_detail = await db.get_sales_detail_range(boshliq, oxiri)
+        sales_detail = await db.get_sales_detail_range(boshliq, bugun)
         # Xom ashyo sarfi
-        chiqim = await db.get_material_chiqim_range(boshliq, oxiri)
+        chiqim = await db.get_material_chiqim_range(boshliq, bugun)
 
-        text = f"📊 Tafsilotli hisobot\n📅 {boshliq} — {oxiri}\n━━━━━━━━━━━━━━━━\n\n"
+        text = f"📊 Tafsilotli hisobot\n📅 {boshliq} — {bugun}\n━━━━━━━━━━━━━━━━\n\n"
 
         # Ishlab chiqarish
         text += "🏭 ISHLAB CHIQARISH:\n"
@@ -185,19 +182,18 @@ async def tafsilotli_hisobot(message: Message):
 @router.message(F.text == "📥 Excel hisobot")
 async def excel_hisobot(message: Message):
     try:
-        bugun = date.today()
-        boshliq = str(bugun.replace(day=1))
-        oxiri = str(bugun)
+        bugun = db.bugungi_sana()
+        boshliq = bugun.replace(day=1)
 
-        prod_logs = await db.get_production_range(boshliq, oxiri)
-        sales_logs = await db.get_sales_range(boshliq, oxiri)
+        prod_logs = await db.get_production_range(boshliq, bugun)
+        sales_logs = await db.get_sales_range(boshliq, bugun)
         materials = await db.get_materials()
         goods = await db.get_finished_goods()
         formula = await db.get_qolip_formula()
         audit_logs = await db.get_audit_log(200)
-        prod_detail = await db.get_production_detail_range(boshliq, oxiri)
-        sales_detail = await db.get_sales_detail_range(boshliq, oxiri)
-        chiqim_logs = await db.get_material_chiqim_range(boshliq, oxiri)
+        prod_detail = await db.get_production_detail_range(boshliq, bugun)
+        sales_detail = await db.get_sales_detail_range(boshliq, bugun)
+        chiqim_logs = await db.get_material_chiqim_range(boshliq, bugun)
 
         wb = openpyxl.Workbook()
         sarlavha_font = Font(bold=True, size=11, color="FFFFFF")
@@ -306,11 +302,11 @@ async def excel_hisobot(message: Message):
         wb.save(buffer)
         buffer.seek(0)
 
-        fayl_nomi = f"gazobot_{boshliq}_{oxiri}.xlsx"
+        fayl_nomi = f"gazobot_{boshliq}_{bugun}.xlsx"
         await message.answer_document(
             BufferedInputFile(buffer.read(), filename=fayl_nomi),
             caption=(
-                f"📥 Excel hisobot\n📅 {boshliq} — {oxiri}\n"
+                f"📥 Excel hisobot\n📅 {boshliq} — {bugun}\n"
                 f"7 ta varaq: Ishlab chiqarish, Tafsilot, "
                 f"Sotuv, Sotuv tafsilot, Xom ashyo, Ombor, Audit"
             )
@@ -320,7 +316,7 @@ async def excel_hisobot(message: Message):
 
 async def avtomatik_hisobot(bot, chat_id):
     try:
-        bugun = str(date.today())
+        bugun = db.bugungi_sana()
         text = await hisobot_matni(bugun, bugun, "🔔 Avtomatik kunlik hisobot")
         await bot.send_message(chat_id, text)
     except Exception as e:
