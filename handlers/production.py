@@ -107,7 +107,7 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
         bugun = str(date.today())
         user_id = message.from_user.id
 
-        # Bazaga yozish va ID larini olish
+        # Bazaga yozish
         prod_ids = []
         if s1 > 0:
             pid = await db.add_production_log(bugun, 1, s1, user_id)
@@ -119,10 +119,12 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
             pid = await db.add_production_log(bugun, 3, s3, user_id)
             prod_ids.append((pid, 3, s3))
 
-        # Xom ashyoni kamaytirish va chiqim log
+        # Xom ashyoni kamaytirish
         formula = await db.get_qolip_formula()
         ogohlantirish = []
         sarflar = []
+        min_settings = await db.get_settings()
+        min_map = {s[3]: s[1] for s in min_settings}
 
         for f in formula:
             nomi = f[0]
@@ -133,10 +135,9 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
 
             ketgan_asosiy = miqdor_asosiy * jami_qolip
             yangi_qoldiq = max(0.0, qoldiq_asosiy - ketgan_asosiy)
-
             await db.update_material_qoldiq(material_id, yangi_qoldiq)
 
-            # Chiqim logga yozish (har bir production_log uchun)
+            # Chiqim log
             for pid, shablon, qolip_soni in prod_ids:
                 ketgan_bu_log = miqdor_asosiy * qolip_soni
                 await db.add_material_chiqim_log(
@@ -151,15 +152,15 @@ async def shablon3_kiritish(message: Message, state: FSMContext):
                 f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
             )
 
-            all_settings = await db.get_settings()
-            for s in all_settings:
-                if s[3] == material_id and yangi_qoldiq <= s[1]:
-                    min_asl = db.asosiydan_birlikga(s[1], asl_birlik)
-                    ogohlantirish.append(
-                        f"⚠️ {nomi} kam qoldi!\n"
-                        f"   Qoldiq: {qoldiq_asl:.2f} {asl_birlik}\n"
-                        f"   Minimum: {min_asl:.2f} {asl_birlik}"
-                    )
+            # Min chegara tekshirish
+            min_ch = min_map.get(material_id)
+            if min_ch and yangi_qoldiq <= min_ch:
+                min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
+                ogohlantirish.append(
+                    f"⚠️ {nomi} kam qoldi!\n"
+                    f"   Qoldiq: {qoldiq_asl:.2f} {asl_birlik}\n"
+                    f"   Minimum: {min_asl:.2f} {asl_birlik}"
+                )
 
         # Tayyor mahsulot omboriga qo'shish
         if A_blok > 0:
@@ -249,4 +250,3 @@ async def oxirgi_ochirish(message: Message):
             await message.answer(tafsilot, reply_markup=production_menu())
     except Exception as e:
         await message.answer(f"❌ Xatolik: {str(e)}", reply_markup=production_menu())
-        
