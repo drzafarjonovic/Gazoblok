@@ -139,7 +139,7 @@ async def inv_tarixi(message: Message):
             text += (
                 f"📅 {vaqt_str} | {log['block_type']} blok\n"
                 f"   Bot: {log['bot_hisob']} | Real: {log['real_hisob']} | Farq: {farq_text}\n"
-                f"   {log['user_ism'] or 'Noma'lum'}\n"
+                f"   {log['user_ism'] or 'Noma lum'}\n"
             )
             if log["izoh"]:
                 text += f"   📝 {log['izoh']}\n"
@@ -149,3 +149,4 @@ async def inv_tarixi(message: Message):
         await message.answer(text, reply_markup=inventory_menu())
     except Exception as e:
         await message.answer(f"❌ Xatolik: {str(e)}")
+        
