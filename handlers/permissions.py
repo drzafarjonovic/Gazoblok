@@ -282,4 +282,4 @@ async def huquqlar_royxati(message: Message):
         await message.answer(text, reply_markup=permissions_menu())
     except Exception as e:
         await message.answer(f"❌ Xatolik: {str(e)}")
-    
+
