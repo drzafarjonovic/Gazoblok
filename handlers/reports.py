@@ -325,4 +325,4 @@ async def avtomatik_hisobot(bot, chat_id):
         await bot.send_message(chat_id, text)
     except Exception as e:
         print(f"Avtomatik hisobot xatoligi: {e}")
-                          
+
