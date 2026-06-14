@@ -489,6 +489,21 @@ async def clear_qolip_formula():
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM qolip_formula")
 
+async def get_settings():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                s.id,
+                s.min_chegara,
+                m.nomi,
+                m.id
+            FROM settings s
+            JOIN materials m
+                ON m.id = s.material_id
+            ORDER BY m.nomi
+        """)
+        return [tuple(r) for r in rows]
 # ── Material tekshiruvi ──
 async def check_material_yetarli(jami_qolip):
     formula = await get_qolip_formula()
