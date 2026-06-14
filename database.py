@@ -454,13 +454,15 @@ async def delete_material(material_id):
 async def clear_all_data():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("DELETE FROM materials")
-        await conn.execute("DELETE FROM qolip_formula")
-        await conn.execute("DELETE FROM production_log")
-        await conn.execute("DELETE FROM sales_log")
-        await conn.execute("DELETE FROM settings")
+        # Tartib muhim! Avval bog'liq jadvallar
         await conn.execute("DELETE FROM material_chiqim_log")
+        await conn.execute("DELETE FROM audit_log")
+        await conn.execute("DELETE FROM sales_log")
+        await conn.execute("DELETE FROM production_log")
         await conn.execute("DELETE FROM inventarizatsiya")
+        await conn.execute("DELETE FROM settings")
+        await conn.execute("DELETE FROM qolip_formula")
+        await conn.execute("DELETE FROM materials")
         await conn.execute("UPDATE finished_goods SET qoldiq=0")
 
 # ── Qolip formulasi ──
@@ -556,12 +558,10 @@ async def add_production_log(sana, shablon, qolip_soni, user_id=None):
         return row["id"]
 
 async def delete_last_production_with_restore():
-    """Oxirgi ishlab chiqarishni o'chirib, materiallarni omborga qaytaradi"""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Oxirgi yozuv
         row = await conn.fetchrow(
-            "SELECT id, shablon, qolip_soni, sana FROM production_log ORDER BY id DESC LIMIT 1"
+            "SELECT id, shablon, qolip_soni FROM production_log ORDER BY id DESC LIMIT 1"
         )
         if not row:
             return False, "❌ O'chiriladigan yozuv yo'q!"
@@ -570,14 +570,7 @@ async def delete_last_production_with_restore():
         shablon = row["shablon"]
         qolip_soni = row["qolip_soni"]
 
-        # Shu yozuvga tegishli chiqim loglarini topish
-        chiqim_logs = await conn.fetch("""
-            SELECT material_id, material_nomi, ketgan_miqdor, birlik
-            FROM material_chiqim_log
-            WHERE production_log_id=$1
-        """, prod_id)
-
-        # Bloklar hisobi (tayyor ombordan ayirish)
+        # Bloklar hisobi
         if shablon == 1:
             A_blok = qolip_soni * 12
             B_blok = 0
@@ -588,20 +581,56 @@ async def delete_last_production_with_restore():
             A_blok = qolip_soni * 11
             B_blok = qolip_soni * 2
 
-        # Tayyor ombordan ayirish
+        # Tayyor mahsulot omboridan AYIRISH
         if A_blok > 0:
-            await conn.execute("""
-                UPDATE finished_goods
-                SET qoldiq = GREATEST(0, qoldiq - $1)
-                WHERE block_type='A'
-            """, A_blok)
+            await conn.execute(
+                "UPDATE finished_goods SET qoldiq=GREATEST(0, qoldiq-$1) WHERE block_type='A'",
+                A_blok
+            )
         if B_blok > 0:
-            await conn.execute("""
-                UPDATE finished_goods
-                SET qoldiq = GREATEST(0, qoldiq - $1)
-                WHERE block_type='B'
-            """, B_blok)
+            await conn.execute(
+                "UPDATE finished_goods SET qoldiq=GREATEST(0, qoldiq-$1) WHERE block_type='B'",
+                B_blok
+            )
 
+        # Chiqim logdan materiallarni topib omborga qaytarish
+        chiqim_logs = await conn.fetch(
+            "SELECT material_id, material_nomi, ketgan_miqdor FROM material_chiqim_log WHERE production_log_id=$1",
+            prod_id
+        )
+
+        qaytarilgan = []
+        for ch in chiqim_logs:
+            await conn.execute(
+                "UPDATE materials SET qoldiq=qoldiq+$1 WHERE id=$2",
+                ch["ketgan_miqdor"], ch["material_id"]
+            )
+            mat = await conn.fetchrow(
+                "SELECT asl_birlik FROM materials WHERE id=$1", ch["material_id"]
+            )
+            if mat:
+                asl = mat["asl_birlik"]
+                asl_miqdor = __import__('database').asosiydan_birlikga(ch["ketgan_miqdor"], asl)
+                qaytarilgan.append(
+                    f"   {ch['material_nomi']}: +{asl_miqdor:.2f} {asl}"
+                )
+
+        # Loglarni o'chirish
+        await conn.execute(
+            "DELETE FROM material_chiqim_log WHERE production_log_id=$1", prod_id
+        )
+        await conn.execute(
+            "DELETE FROM production_log WHERE id=$1", prod_id
+        )
+
+        tafsilot = f"Shablon {shablon}, {qolip_soni} qolip o'chirildi\n"
+        tafsilot += f"Tayyor ombordan ayirildi: A={A_blok}, B={B_blok}\n"
+        if qaytarilgan:
+            tafsilot += "Omborga qaytarildi:\n" + "\n".join(qaytarilgan)
+        else:
+            tafsilot += "(Chiqim tarixi topilmadi)"
+
+        return True, tafsilot
         # Materiallarni omborga qaytarish
         qaytarilgan = []
         for ch in chiqim_logs:
