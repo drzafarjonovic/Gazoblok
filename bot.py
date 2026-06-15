@@ -105,6 +105,7 @@ class PermissionMiddleware(BaseMiddleware):
         "👷 Ishchilar hisoboti": "hisobot_korish",
         "💰 Moliya hisoboti": "hisobot_korish",
         "📈 Taqqoslash": "hisobot_korish",
+        "📉 Grafiklar": "hisobot_korish",
         "📥 Excel hisobot": "excel_hisobot",
         "📋 Inventarizatsiya": "tayyor_mahsulot_tahrirlash",
     }

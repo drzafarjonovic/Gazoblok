@@ -11,6 +11,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 import database as db
 import valyuta as val
+import charts
 from translation import (
     Tkey, say, say_error, build_keyboard, t, log_exc, GENERIC_ERROR,
     foydalanuvchi_tili, tarjima_qil, register_ui,
@@ -48,6 +49,7 @@ async def reports_menu(user_id):
         ["👷 Ishchilar hisoboti"],
         ["💰 Moliya hisoboti"],
         ["📈 Taqqoslash"],
+        ["📉 Grafiklar"],
         ["📥 Excel hisobot"],
         ["🏠 Asosiy menyu"],
     ])
@@ -267,7 +269,7 @@ async def gen_moliya(boshliq, oxiri, sarlavha):
     tayyor_sotuv = A_qoldiq * sotuv_A + B_qoldiq * sotuv_B
     kod = await val.get_active()
 
-    return (
+    text = (
         f"💰 Moliya hisoboti ({sarlavha})\n"
         f"📅 {boshliq} — {oxiri}\n"
         f"💱 Valyuta: {val.belgi(kod)} ({kod})\n"
@@ -286,6 +288,20 @@ async def gen_moliya(boshliq, oxiri, sarlavha):
         f"   Tannarxda: {await val.format_uzs(tayyor_tannarx)}\n"
         f"   Sotuv narxida: {await val.format_uzs(tayyor_sotuv)}"
     )
+
+    # Kunlik daromad/foyda jadvali (sotuv bo'lgan kunlar)
+    daily = await db.get_sales_daily(boshliq, oxiri)
+    if daily:
+        text += "\n\n📅 KUNLIK (daromad | foyda):\n"
+        for d in daily[-20:]:
+            cogs_d = d["A"] * ti["A"] + d["B"] * ti["B"]
+            foyda_d = d["rev"] - cogs_d
+            kun = str(d["sana"])[5:]  # MM-DD
+            text += (
+                f"   {kun}: {await val.format_uzs(d['rev'])} | "
+                f"{await val.format_uzs(foyda_d)}\n"
+            )
+    return text
 
 
 async def gen_ishchi(boshliq, oxiri, sarlavha):
@@ -491,6 +507,60 @@ async def _excel_yubor(target, user_id, boshliq, oxiri):
     )
 
 
+# ── Grafiklar ──
+async def _grafik_yubor(target, user_id, boshliq, oxiri):
+    if not charts.MATPLOTLIB:
+        await _yubor(target, user_id,
+                     "❌ Grafik moduli mavjud emas (matplotlib o'rnatilmagan).")
+        return
+    prod_daily = await db.get_production_daily(boshliq, oxiri)
+    sales_daily = await db.get_sales_daily(boshliq, oxiri)
+    if not prod_daily and not sales_daily:
+        await _yubor(target, user_id, "📊 Bu davrda ma'lumot yo'q.")
+        return
+
+    sanalar = sorted(set([d["sana"] for d in prod_daily]
+                         + [d["sana"] for d in sales_daily]))
+    prod_map = {d["sana"]: d for d in prod_daily}
+    sales_map = {d["sana"]: d for d in sales_daily}
+    labels = [str(s)[5:] for s in sanalar]  # MM-DD
+    qolip_vals = [prod_map.get(s, {}).get("qolip", 0) for s in sanalar]
+    sotuv_vals = [sales_map.get(s, {}).get("qty", 0) for s in sanalar]
+
+    # 1. Trend
+    png = charts.trend_chart(labels, qolip_vals, sotuv_vals,
+                             "Ishlab chiqarish va sotuv")
+    if png:
+        cap = await t("📈 Ishlab chiqarish va sotuv trendi", user_id)
+        await target.answer_photo(BufferedInputFile(png, "trend.png"), caption=cap)
+
+    # 2. Ishlab chiqarish A/B (pie)
+    totA = sum(prod_map.get(s, {}).get("A", 0) for s in sanalar)
+    totB = sum(prod_map.get(s, {}).get("B", 0) for s in sanalar)
+    png2 = charts.pie_chart(totA, totB, "Ishlab chiqarish (A/B)")
+    if png2:
+        cap = await t("🥧 Ishlab chiqarish taqsimoti (A/B)", user_id)
+        await target.answer_photo(BufferedInputFile(png2, "pie.png"), caption=cap)
+
+    # 3. Kunlik daromad va foyda (bar) — faol valyutaga o'girilgan
+    kod = await val.get_active()
+    rate = await val.get_rate(kod)
+    conv = (lambda x: x) if (kod == val.ASOS or not rate) else (lambda x: x / rate)
+    ti = await db.tannarx_hisobla()
+    rev_vals, profit_vals = [], []
+    for s in sanalar:
+        sd = sales_map.get(s, {})
+        rev = sd.get("rev", 0)
+        cogs = sd.get("A", 0) * ti["A"] + sd.get("B", 0) * ti["B"]
+        rev_vals.append(round(conv(rev), 2))
+        profit_vals.append(round(conv(rev - cogs), 2))
+    if any(rev_vals) or any(profit_vals):
+        png3 = charts.finance_bar(labels, rev_vals, profit_vals, val.belgi(kod))
+        if png3:
+            cap = await t("📊 Kunlik daromad va foyda", user_id)
+            await target.answer_photo(BufferedInputFile(png3, "finance.png"), caption=cap)
+
+
 # ── Umumiy yuborish ──
 async def _yubor(target, user_id, matn):
     tt = await t(matn, user_id)
@@ -503,6 +573,9 @@ async def _generate(target, user_id, rtype, boshliq, oxiri, sarlavha):
     try:
         if rtype == "excel":
             await _excel_yubor(target, user_id, boshliq, oxiri)
+            return
+        if rtype == "grafik":
+            await _grafik_yubor(target, user_id, boshliq, oxiri)
             return
         if rtype == "umumiy":
             matn = await hisobot_matni(boshliq, oxiri, f"📊 {sarlavha}")
@@ -573,6 +646,11 @@ async def taqqos_entry(message: Message):
 @router.message(Tkey("📥 Excel hisobot"))
 async def excel_entry(message: Message):
     await _davr_sorov(message, "excel")
+
+
+@router.message(Tkey("📉 Grafiklar"))
+async def grafik_entry(message: Message):
+    await _davr_sorov(message, "grafik")
 
 
 # ── Davr callback ──

@@ -1313,3 +1313,53 @@ async def get_sales_by_user_range(boshliq, oxiri):
             "qty": int(r["qty"]),
             "rev": float(r["rev"]),
         } for r in rows]
+
+
+
+# ── Kunlik agregatlar (grafiklar uchun) ──
+async def get_production_daily(boshliq, oxiri):
+    """Kunlik ishlab chiqarish: [{sana, qolip, A, B}] (sana bo'yicha)."""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT sana, shablon, COALESCE(SUM(qolip_soni), 0) AS qty
+            FROM production_log
+            WHERE sana BETWEEN $1 AND $2
+            GROUP BY sana, shablon
+        """, boshliq_str, oxiri_str)
+    agg = {}
+    for r in rows:
+        d = agg.setdefault(r["sana"], {"sana": r["sana"], "qolip": 0, "A": 0, "B": 0})
+        a, b = shablon_bloklari(r["shablon"], r["qty"])
+        d["qolip"] += r["qty"]
+        d["A"] += a
+        d["B"] += b
+    return [agg[k] for k in sorted(agg.keys())]
+
+
+async def get_sales_daily(boshliq, oxiri):
+    """Kunlik sotuv: [{sana, A, B, qty, rev}] (sana bo'yicha). rev — UZS."""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT sana, block_type,
+                   COALESCE(SUM(miqdor), 0) AS qty,
+                   COALESCE(SUM(miqdor * COALESCE(narx, 0)), 0) AS rev
+            FROM sales_log
+            WHERE sana BETWEEN $1 AND $2
+            GROUP BY sana, block_type
+        """, boshliq_str, oxiri_str)
+    agg = {}
+    for r in rows:
+        d = agg.setdefault(r["sana"], {"sana": r["sana"], "A": 0, "B": 0, "qty": 0, "rev": 0.0})
+        if r["block_type"] == "A":
+            d["A"] += int(r["qty"])
+        elif r["block_type"] == "B":
+            d["B"] += int(r["qty"])
+        d["qty"] += int(r["qty"])
+        d["rev"] += float(r["rev"])
+    return [agg[k] for k in sorted(agg.keys())]
