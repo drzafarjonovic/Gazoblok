@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
 from translation import (
-    Tkey, say, build_keyboard, t, invalidate_til_cache, TIL_NOMLARI,
+    Tkey, say, build_keyboard, t, invalidate_til_cache, prewarm, TIL_NOMLARI,
 )
 
 router = Router()
@@ -678,6 +678,7 @@ async def til_ozgartirish_callback(callback: CallbackQuery):
     # Tilni saqlash
     await db.update_user_til(user_id, til_kod)
     invalidate_til_cache(user_id)
+    await prewarm(til_kod)
 
     # Tasdiqlash (yangi tilda)
     xabar = await t("✅ Til o'zgartirildi!", user_id)

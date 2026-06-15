@@ -11,7 +11,7 @@ from typing import Callable, Dict, Any, Awaitable
 import database as db
 from translation import (
     t, tarjima_qil, foydalanuvchi_tili, invalidate_til_cache,
-    build_keyboard, Tkey, TIL_NOMLARI,
+    build_keyboard, Tkey, TIL_NOMLARI, prewarm, ensure_warm,
 )
 from handlers import (settings, production, sales, warehouse,
                       reports, finished_goods, users, permissions, inventory)
@@ -141,13 +141,16 @@ class PermissionMiddleware(BaseMiddleware):
             await event.answer("⛔ Sizning hisobingiz bloklangan!")
             return
 
+        # Tilni bir marta isitamiz (cold-start sekinligini oldini olish)
+        til = user.get("til") or "uz"
+        await ensure_warm(til)
+
         # Superadmin hamma narsaga kirishi mumkin
         if user["rol"] == "superadmin":
             data["user"] = user
             return await handler(event, data)
 
         # Permission tekshiruvi (til-aware)
-        til = user.get("til") or "uz"
         kanonik = await self._kanonik_tugma(event.text or "", til)
         if kanonik:
             kerakli_perm = self.TUGMA_PERMISSION[kanonik]
@@ -259,6 +262,7 @@ async def til_tanlash_callback(callback: CallbackQuery):
         await db.add_user(user_id, ism, username, "superadmin")
         await db.update_user_til(user_id, til_kod)
         invalidate_til_cache(user_id)
+        await prewarm(til_kod)
         await db.set_bot_setting("admin_chat_id", str(user_id))
         menu = await get_menu(user_id, "superadmin")
         xabar = await t(
@@ -276,6 +280,7 @@ async def til_tanlash_callback(callback: CallbackQuery):
     # Mavjud user uchun tilni saqlash
     await db.update_user_til(user_id, til_kod)
     invalidate_til_cache(user_id)
+    await prewarm(til_kod)
 
     # Tasdiqlash xabari (tanlangan tilda)
     xabar_tasdiqlash = await t("✅ Til o'zgartirildi!", user_id)

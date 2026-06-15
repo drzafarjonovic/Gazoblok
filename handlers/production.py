@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, eq, say, build_keyboard, foydalanuvchi_tili, tarjima_qil, t
+from translation import Tkey, eq, say, build_keyboard, foydalanuvchi_tili, tarjima_qil, t, register_ui
 
 router = Router()
 
@@ -13,6 +13,9 @@ SHABLON_LABEL = {
     2: "📦 Shablon 2 — 24B",
     3: "📦 Shablon 3 — 11A+2B",
 }
+
+# Shablon yorliqlari va "qolip" so'zini pre-warm katalogiga qo'shamiz
+register_ui(*SHABLON_LABEL.values(), "qolip")
 
 
 class ProductionState(StatesGroup):

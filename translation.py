@@ -55,6 +55,72 @@ def invalidate_til_cache(user_id: int) -> None:
     _TIL_CACHE.pop(user_id, None)
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# UI katalogi va pre-warm (gibrid: avtomatik tarjima + oldindan cache'lash)
+# ──────────────────────────────────────────────────────────────────────────
+# Statik UI matnlari (tugmalar va kanonik nomlar) shu yerga avtomatik
+# ro'yxatdan o'tadi. Bu lug'at QO'LDA yuritilmaydi — Tkey/eq/canon/
+# build_keyboard chaqirilganda o'zidan to'ldiriladi.
+_CATALOG: set = set()
+
+# Qaysi til qancha catalog elementi bilan "isitilgan": {til: size}
+_WARMED: dict = {}
+
+# Pre-warm uchun bir vaqtning o'zida ortiqcha ish bo'lmasligi uchun lock
+_WARM_LOCKS: dict = {}
+_WARM_GUARD = asyncio.Lock()
+
+# Pre-warm vaqtida Google'ga bir vaqtda yuboriladigan maksimal so'rovlar
+_PREWARM_CONCURRENCY = 8
+
+
+def register_ui(*uz_texts: str) -> None:
+    """Statik UI matnlarini katalogga qo'shadi (pre-warm uchun)."""
+    for s in uz_texts:
+        if s and s.strip():
+            _CATALOG.add(s)
+
+
+async def prewarm(til: str) -> None:
+    """
+    Katalogdagi barcha (hali cache'da bo'lmagan) UI matnlarini
+    berilgan tilga PARALLEL tarjima qilib, xotira + Supabase cache'ga saqlaydi.
+    """
+    if til == "uz" or til not in TILLAR:
+        return
+    targets = [s for s in list(_CATALOG) if (s, til) not in _TARJIMA_CACHE]
+    if not targets:
+        return
+
+    sem = asyncio.Semaphore(_PREWARM_CONCURRENCY)
+
+    async def _one(s: str):
+        async with sem:
+            await tarjima_qil(s, til)
+
+    await asyncio.gather(*(_one(s) for s in targets), return_exceptions=True)
+
+
+async def ensure_warm(til: str) -> None:
+    """
+    Til hali to'liq isitilmagan bo'lsa, bir marta pre-warm qiladi.
+    Tez-tez chaqirilsa ham xavfsiz (isitilgan bo'lsa darhol qaytadi).
+    """
+    if til == "uz" or til not in TILLAR:
+        return
+    if _WARMED.get(til, -1) >= len(_CATALOG):
+        return
+    # Til uchun lock olamiz (ikki marta isitmaslik uchun)
+    async with _WARM_GUARD:
+        lock = _WARM_LOCKS.setdefault(til, asyncio.Lock())
+    async with lock:
+        size = len(_CATALOG)
+        if _WARMED.get(til, -1) >= size:
+            return
+        await prewarm(til)
+        _WARMED[til] = size
+
+
 async def tarjima_qil(matn: str, til: str) -> str:
     """
     Matnni berilgan tilga tarjima qilish (xotira + Supabase cache + Google).
@@ -184,6 +250,7 @@ class Tkey(Filter):
 
     def __init__(self, *uz_texts: str):
         self.uz_texts = uz_texts
+        register_ui(*uz_texts)
 
     async def __call__(self, message: Message) -> bool:
         if not message.text or not message.from_user:
@@ -199,6 +266,7 @@ class Tkey(Filter):
 
 async def eq(message: Message, *uz_texts: str) -> bool:
     """State handlerlari ichida tugma matnini tekshirish (til-aware)."""
+    register_ui(*uz_texts)
     if not message.text or not message.from_user:
         return False
     til = await foydalanuvchi_tili(message.from_user.id)
@@ -218,6 +286,7 @@ async def canon(message: Message, candidates: Sequence[str]) -> Optional[str]:
     Returns:
         Mos kelgan kanonik uz matni yoki None.
     """
+    register_ui(*candidates)
     if not message.text or not message.from_user:
         return None
     til = await foydalanuvchi_tili(message.from_user.id)
@@ -242,6 +311,8 @@ async def build_keyboard(
         user_id: Foydalanuvchi ID
         rows: Tugma qatorlari, har bir qator — o'zbekcha matnlar ro'yxati
     """
+    for row in rows:
+        register_ui(*row)
     til = await foydalanuvchi_tili(user_id)
     keyboard = []
     for row in rows:
