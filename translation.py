@@ -48,13 +48,28 @@ DEEP_TRANSLATOR_TIL = {
 # ──────────────────────────────────────────────────────────────────────────
 # Cache qatlamlari
 # ──────────────────────────────────────────────────────────────────────────
-# 1. Tarjima cache (xotira): {(original, til): tarjima}
+# 1. Statik UI tarjima cache (xotira): {(original, til): tarjima}
+#    Faqat katalogdagi (statik) matnlar — chegaralangan, Supabase'ga saqlanadi.
 _TARJIMA_CACHE: dict = {}
+
+# 1b. Dinamik (sonli) xabarlar cache: chegaralangan (FIFO), Supabase'ga saqlanMAYDI
+_DYN_CACHE: dict = {}
+_DYN_MAX = 2000
 
 # 2. Foydalanuvchi tili cache (TTL bilan): {user_id: (til, timestamp)}
 #    Bu har bir filtr/handlerda get_user chaqirilishining oldini oladi.
 _TIL_CACHE: dict = {}
 _TIL_TTL = 5.0  # soniya
+
+
+def _dyn_put(key, val) -> None:
+    """Dinamik cache'ga qo'shish (chegara oshsa eng eski element o'chadi)."""
+    if len(_DYN_CACHE) >= _DYN_MAX:
+        try:
+            _DYN_CACHE.pop(next(iter(_DYN_CACHE)))
+        except StopIteration:
+            pass
+    _DYN_CACHE[key] = val
 
 
 def invalidate_til_cache(user_id: int) -> None:
@@ -151,20 +166,26 @@ async def tarjima_qil(matn: str, til: str) -> str:
     if til not in TILLAR:
         return matn
 
-    # 0. Xotira cache
+    # 0. Xotira cache (statik + dinamik)
     cache_key = (matn, til)
     if cache_key in _TARJIMA_CACHE:
         return _TARJIMA_CACHE[cache_key]
+    if cache_key in _DYN_CACHE:
+        return _DYN_CACHE[cache_key]
+
+    # Statik (UI katalogidagi) matnmi yoki dinamik (sonli) xabarmi?
+    is_static = matn in _CATALOG
 
     try:
         # Database dan import (circular import oldini olish uchun ichkarida)
         import database as db
 
-        # 1. Avval Supabase cache dan qidirish
-        cached = await db.get_translation(matn, til)
-        if cached:
-            _TARJIMA_CACHE[cache_key] = cached
-            return cached
+        # 1. Faqat statik matnlar uchun Supabase cache dan qidiramiz
+        if is_static:
+            cached = await db.get_translation(matn, til)
+            if cached:
+                _TARJIMA_CACHE[cache_key] = cached
+                return cached
 
         # 2. Deep Translator bilan tarjima qilish
         til_nomi = DEEP_TRANSLATOR_TIL.get(til)
@@ -181,9 +202,14 @@ async def tarjima_qil(matn: str, til: str) -> str:
         if not tarjima:
             return matn
 
-        # 3. Tarjimani Supabase + xotira ga saqlash (cache)
-        await db.save_translation(matn, til, tarjima)
-        _TARJIMA_CACHE[cache_key] = tarjima
+        # 3. Saqlash:
+        #    - statik matnlar: Supabase + chegarasiz xotira (katalog cheklangan)
+        #    - dinamik matnlar: faqat chegaralangan xotira (DB shishmaydi)
+        if is_static:
+            await db.save_translation(matn, til, tarjima)
+            _TARJIMA_CACHE[cache_key] = tarjima
+        else:
+            _dyn_put(cache_key, tarjima)
 
         return tarjima
 
