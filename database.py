@@ -1,6 +1,7 @@
 import asyncpg
 import asyncio
 import os
+import time
 from datetime import datetime, date, timezone, timedelta
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -357,6 +358,21 @@ async def init_db():
         await conn.execute(
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS til TEXT DEFAULT 'uz'"
         )
+        # Narx/moliya moduli ustunlari
+        await conn.execute(
+            "ALTER TABLE materials ADD COLUMN IF NOT EXISTS narx DOUBLE PRECISION DEFAULT 0"
+        )
+        await conn.execute(
+            "ALTER TABLE sales_log ADD COLUMN IF NOT EXISTS narx DOUBLE PRECISION DEFAULT 0"
+        )
+        # Valyuta kurslari cache jadvali (1 kod = kurs UZS)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS valyuta_kurslari (
+                kod TEXT PRIMARY KEY,
+                kurs DOUBLE PRECISION NOT NULL,
+                vaqt_epoch DOUBLE PRECISION NOT NULL
+            )
+        """)
 
 # ── Permissions ──
 async def get_user_permissions(user_id, rol):
@@ -915,9 +931,17 @@ async def add_sales_log(sana, block_type, miqdor, user_id=None):
                     f"   {block_type} blok: bor {joriy_qoldiq} ta, "
                     f"kerak {miqdor} ta"
                 )
+            # Sotuv narxini (UZS) snapshot qilamiz — tarixiy aniqlik uchun
+            narx_kalit = "sotuv_narx_A" if block_type == "A" else "sotuv_narx_B"
+            narx_row = await conn.fetchrow(
+                "SELECT qiymat FROM bot_settings WHERE kalit=$1", narx_kalit
+            )
+            narx = (float(narx_row["qiymat"])
+                    if narx_row and narx_row["qiymat"] not in (None, "") else 0.0)
             await conn.execute(
-                "INSERT INTO sales_log (sana,block_type,miqdor,user_id) VALUES ($1,$2,$3,$4)",
-                sana_str, block_type, miqdor, user_id
+                "INSERT INTO sales_log (sana,block_type,miqdor,user_id,narx) "
+                "VALUES ($1,$2,$3,$4,$5)",
+                sana_str, block_type, miqdor, user_id, narx
             )
             await conn.execute(
                 "UPDATE finished_goods SET qoldiq=qoldiq-$1 WHERE block_type=$2",
@@ -1103,3 +1127,129 @@ async def update_user_til(user_id: int, til: str):
         await conn.execute(
             "UPDATE users SET til=$1 WHERE id=$2", til, user_id
         )
+
+
+
+# ── Valyuta kurslari (cache) ──
+async def get_kurs(kod):
+    """{'kurs':..., 'vaqt_epoch':...} yoki None."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT kurs, vaqt_epoch FROM valyuta_kurslari WHERE kod=$1", kod
+        )
+        return dict(row) if row else None
+
+
+async def set_kurs(kod, kurs):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO valyuta_kurslari (kod, kurs, vaqt_epoch)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (kod) DO UPDATE SET kurs=$2, vaqt_epoch=$3
+        """, kod, float(kurs), time.time())
+
+
+# ── Material narxlari (UZS, baza birligi uchun) ──
+async def get_material_narxlar():
+    """{material_id: narx_asosiy_uzs}."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, narx FROM materials")
+        return {r["id"]: (r["narx"] or 0.0) for r in rows}
+
+
+async def set_material_narx(material_id, narx_asosiy):
+    """narx_asosiy: 1 baza birlik (kg yoki litr) uchun narx, UZS da."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE materials SET narx=$1 WHERE id=$2", float(narx_asosiy), material_id
+        )
+
+
+# ── Tannarx hisobi (hammasi UZS da) ──
+async def tannarx_hisobla():
+    """
+    1 qolip va 1 blok (A/B) tannarxini hisoblaydi (UZS).
+    A = qolip/12, B = qolip/24 (hajm bo'yicha). Override bo'lsa o'sha ishlatiladi.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        formula = await conn.fetch("""
+            SELECT m.nomi, m.asl_birlik, q.miqdor_asosiy, COALESCE(m.narx, 0) AS narx
+            FROM qolip_formula q
+            JOIN materials m ON q.material_id = m.id
+        """)
+
+    material_cost = 0.0
+    tafsil = []
+    for f in formula:
+        ketgan = f["miqdor_asosiy"]
+        narx = f["narx"] or 0.0
+        summa = ketgan * narx
+        material_cost += summa
+        tafsil.append({
+            "nomi": f["nomi"],
+            "miqdor_asosiy": ketgan,
+            "narx": narx,
+            "summa": summa,
+        })
+
+    ishchi = float(await get_bot_setting("ishchi_haqi_qolip") or 0)
+    qoshimcha = float(await get_bot_setting("qoshimcha_xarajat_qolip") or 0)
+    qolip = material_cost + ishchi + qoshimcha
+
+    A_auto = qolip / 12.0
+    B_auto = qolip / 24.0
+
+    A_over = await get_bot_setting("tannarx_override_A")
+    B_over = await get_bot_setting("tannarx_override_B")
+    A_over = float(A_over) if A_over not in (None, "") else None
+    B_over = float(B_over) if B_over not in (None, "") else None
+
+    return {
+        "material": material_cost,
+        "ishchi": ishchi,
+        "qoshimcha": qoshimcha,
+        "qolip": qolip,
+        "A_auto": A_auto,
+        "B_auto": B_auto,
+        "A": A_over if A_over is not None else A_auto,
+        "B": B_over if B_over is not None else B_auto,
+        "A_override": A_over,
+        "B_override": B_over,
+        "tafsil": tafsil,
+    }
+
+
+# ── Daromad / ombor qiymati ──
+async def get_sales_revenue_range(boshliq, oxiri):
+    """Davr bo'yicha sotuv: {'A': (qty, revenue_uzs), 'B': (qty, revenue_uzs)}."""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT block_type,
+                   COALESCE(SUM(miqdor), 0) AS qty,
+                   COALESCE(SUM(miqdor * COALESCE(narx, 0)), 0) AS rev
+            FROM sales_log
+            WHERE sana BETWEEN $1 AND $2
+            GROUP BY block_type
+        """, boshliq_str, oxiri_str)
+    natija = {"A": (0, 0.0), "B": (0, 0.0)}
+    for r in rows:
+        natija[r["block_type"]] = (int(r["qty"]), float(r["rev"]))
+    return natija
+
+
+async def ombor_xom_qiymati():
+    """Ombordagi xom ashyo qiymati (UZS): Σ(qoldiq_asosiy × narx)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COALESCE(SUM(qoldiq * COALESCE(narx, 0)), 0) AS jami FROM materials"
+        )
+        return float(row["jami"]) if row else 0.0

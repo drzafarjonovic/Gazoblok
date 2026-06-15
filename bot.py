@@ -15,7 +15,8 @@ from translation import (
     build_keyboard, Tkey, TIL_NOMLARI, prewarm, ensure_warm, esc, log_exc,
 )
 from handlers import (settings, production, sales, warehouse,
-                      reports, finished_goods, users, permissions, inventory)
+                      reports, finished_goods, users, permissions, inventory,
+                      prices)
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -175,6 +176,7 @@ dp.include_router(users.router)
 dp.include_router(permissions.router)
 dp.include_router(inventory.router)
 dp.include_router(settings.router)
+dp.include_router(prices.router)
 dp.include_router(production.router)
 dp.include_router(sales.router)
 dp.include_router(warehouse.router)

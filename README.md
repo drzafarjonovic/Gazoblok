@@ -25,6 +25,13 @@ Gazoblock ERP Bot is a production management platform that helps manufacturers t
 - Sales recording with stock checks (oversell protected)
 - Initial-balance entry
 
+### Finance & Pricing
+- Configurable prices (raw material prices, sale prices, worker wage, overhead) via Settings
+- Automatic cost-per-block calculation (cost per mould → A = /12, B = /24) with optional manual override
+- Financial report: revenue, COGS, net profit, raw-material and finished-goods valuation
+- Multi-currency display (UZS, USD, EUR, RUB, GBP, CNY, TRY, SAR) with online exchange rates (cached, with manual fallback); prices stored internally in UZS
+- Sale price snapshot per sale for historical accuracy
+
 ### Inventory Control
 - Inventory audits and stock reconciliation
 - Difference reporting and historical records

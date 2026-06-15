@@ -5,6 +5,7 @@ import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 import database as db
+import valyuta as val
 from translation import Tkey, say, say_error, build_keyboard, t, log_exc, GENERIC_ERROR
 
 # GMT+5 timezone
@@ -19,6 +20,7 @@ async def reports_menu(user_id):
         ["📊 Haftalik hisobot"],
         ["📊 Oylik hisobot"],
         ["📊 Tafsilotli hisobot"],
+        ["💰 Moliya hisoboti"],
         ["📥 Excel hisobot"],
         ["🏠 Asosiy menyu"],
     ])
@@ -204,6 +206,57 @@ async def tafsilotli_hisobot(message: Message):
         await say_error(message, e)
 
 
+@router.message(Tkey("💰 Moliya hisoboti"))
+async def moliya_hisobot(message: Message):
+    try:
+        bugun = db.bugungi_sana()
+        boshliq = bugun.replace(day=1)
+
+        rev = await db.get_sales_revenue_range(boshliq, bugun)
+        ti = await db.tannarx_hisobla()
+        A_qty, A_rev = rev["A"]
+        B_qty, B_rev = rev["B"]
+
+        daromad = A_rev + B_rev
+        cogs = A_qty * ti["A"] + B_qty * ti["B"]
+        foyda = daromad - cogs
+        foyda_foiz = (foyda / daromad * 100) if daromad > 0 else 0.0
+
+        xom = await db.ombor_xom_qiymati()
+        goods = await db.get_finished_goods()
+        A_qoldiq = next((g[1] for g in goods if g[0] == "A"), 0)
+        B_qoldiq = next((g[1] for g in goods if g[0] == "B"), 0)
+        tayyor_tannarx = A_qoldiq * ti["A"] + B_qoldiq * ti["B"]
+
+        sotuv_A = float(await db.get_bot_setting("sotuv_narx_A") or 0)
+        sotuv_B = float(await db.get_bot_setting("sotuv_narx_B") or 0)
+        tayyor_sotuv = A_qoldiq * sotuv_A + B_qoldiq * sotuv_B
+
+        kod = await val.get_active()
+        text = (
+            f"💰 Moliya hisoboti\n"
+            f"📅 {boshliq} — {bugun}\n"
+            f"💱 Valyuta: {val.belgi(kod)} ({kod})\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"📈 SOTUV (davr):\n"
+            f"   A: {A_qty} ta = {await val.format_uzs(A_rev)}\n"
+            f"   B: {B_qty} ta = {await val.format_uzs(B_rev)}\n"
+            f"   Daromad: {await val.format_uzs(daromad)}\n\n"
+            f"📉 Tannarx (COGS): {await val.format_uzs(cogs)}\n"
+            f"💵 Sof foyda: {await val.format_uzs(foyda)} ({foyda_foiz:.1f}%)\n\n"
+            f"🧱 1 blok tannarxi:\n"
+            f"   A: {await val.format_uzs(ti['A'])} | sotuv: {await val.format_uzs(sotuv_A)}\n"
+            f"   B: {await val.format_uzs(ti['B'])} | sotuv: {await val.format_uzs(sotuv_B)}\n\n"
+            f"🏪 Ombor qiymati (xom ashyo): {await val.format_uzs(xom)}\n"
+            f"🏬 Tayyor mahsulot:\n"
+            f"   Tannarxda: {await val.format_uzs(tayyor_tannarx)}\n"
+            f"   Sotuv narxida: {await val.format_uzs(tayyor_sotuv)}"
+        )
+        await say(message, text, reply_markup=await reports_menu(message.from_user.id))
+    except Exception as e:
+        await say_error(message, e, reply_markup=await reports_menu(message.from_user.id))
+
+
 @router.message(Tkey("📥 Excel hisobot"))
 async def excel_hisobot(message: Message):
     try:
@@ -338,6 +391,41 @@ async def excel_hisobot(message: Message):
                 vaqt_str = str(vaqt)[:16]
             ws7.append([vaqt_str, log["ism"] or "", log["rol"] or "", log["amal"] or "", log["tafsilot"] or ""])
 
+        # 8. Moliya (so'm/UZS — eksport asos valyutada)
+        ws8 = wb.create_sheet("Moliya")
+        sarlavha_qo(ws8, 1, ["Ko'rsatkich", "Qiymat (so'm)"])
+        ws8.column_dimensions["A"].width = 28
+        ws8.column_dimensions["B"].width = 20
+        rev = await db.get_sales_revenue_range(boshliq, bugun)
+        ti = await db.tannarx_hisobla()
+        A_qty, A_rev = rev["A"]
+        B_qty, B_rev = rev["B"]
+        daromad = A_rev + B_rev
+        cogs = A_qty * ti["A"] + B_qty * ti["B"]
+        foyda = daromad - cogs
+        xom = await db.ombor_xom_qiymati()
+        A_q = next((g[1] for g in goods if g[0] == "A"), 0)
+        B_q = next((g[1] for g in goods if g[0] == "B"), 0)
+        sotuv_A = float(await db.get_bot_setting("sotuv_narx_A") or 0)
+        sotuv_B = float(await db.get_bot_setting("sotuv_narx_B") or 0)
+        for nomi_q, qiymat in [
+            ("A sotuv (dona)", A_qty),
+            ("A daromad", round(A_rev)),
+            ("B sotuv (dona)", B_qty),
+            ("B daromad", round(B_rev)),
+            ("Jami daromad", round(daromad)),
+            ("Tannarx (COGS)", round(cogs)),
+            ("Sof foyda", round(foyda)),
+            ("1 A blok tannarxi", round(ti["A"])),
+            ("1 B blok tannarxi", round(ti["B"])),
+            ("A sotuv narxi", round(sotuv_A)),
+            ("B sotuv narxi", round(sotuv_B)),
+            ("Ombor (xom ashyo) qiymati", round(xom)),
+            ("Tayyor mahsulot (tannarx)", round(A_q * ti["A"] + B_q * ti["B"])),
+            ("Tayyor mahsulot (sotuv)", round(A_q * sotuv_A + B_q * sotuv_B)),
+        ]:
+            ws8.append([nomi_q, qiymat])
+
         buffer = io.BytesIO()
         wb.save(buffer)
         buffer.seek(0)
@@ -345,8 +433,8 @@ async def excel_hisobot(message: Message):
         fayl_nomi = f"gazobot_{boshliq}_{bugun}.xlsx"
         caption = await t(
             f"📥 Excel hisobot\n📅 {boshliq} — {bugun}\n"
-            f"7 ta varaq: Ishlab chiqarish, Tafsilot, "
-            f"Sotuv, Sotuv tafsilot, Xom ashyo, Ombor, Audit",
+            f"8 ta varaq: Ishlab chiqarish, Tafsilot, "
+            f"Sotuv, Sotuv tafsilot, Xom ashyo, Ombor, Audit, Moliya",
             message.from_user.id
         )
         await message.answer_document(

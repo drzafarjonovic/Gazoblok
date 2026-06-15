@@ -45,6 +45,7 @@ class AutoHisobotState(StatesGroup):
 async def sozlamalar_menu(user_id):
     return await build_keyboard(user_id, [
         ["🌐 Tilni o'zgartirish"],
+        ["💵 Narxlar va valyuta"],
         ["➕ Material qo'shish"],
         ["📦 Materiallar ro'yxati"],
         ["✏️ Materialni tahrirlash"],
