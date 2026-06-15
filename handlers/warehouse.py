@@ -189,8 +189,8 @@ async def kirim_birlik(message: Message, state: FSMContext):
     try:
         birlik = message.text.strip().lower()
 
-        # Birlik to'g'riligini tekshirish
-        if birlik not in BARCHA_BIRLIKLAR:
+        # Birlik tan olinishini tekshirish
+        if not db.birlik_qollab_quvvatlanadimi(birlik):
             await say(
                 message,
                 f"❌ '{birlik}' birlik tanilmadi!\n\n"
@@ -204,6 +204,16 @@ async def kirim_birlik(message: Message, state: FSMContext):
         miqdor = data["miqdor"]
         asl_birlik = data["asl_birlik"]
         joriy_qoldiq_asosiy = data["joriy_qoldiq_asosiy"]
+
+        # Birlik material o'lchamiga (kg/litr) mos kelishini tekshiramiz
+        if db.birlik_bazasi(birlik) != db.birlik_bazasi(asl_birlik):
+            await say(
+                message,
+                f"❌ Birlik material o'lchamiga mos emas "
+                f"(ombor birligi: {asl_birlik}).\n"
+                f"Bir xil o'lchamdagi birlik kiriting. Qaytadan:"
+            )
+            return
 
         # Hozirgi qoldiqni bazadan yangilab olamiz (stale data oldini olish)
         materials = await db.get_materials()

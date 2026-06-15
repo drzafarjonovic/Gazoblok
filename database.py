@@ -56,6 +56,22 @@ def shablon_bloklari(shablon, qolip_soni):
     a, b = SHABLON_BLOK.get(shablon, (0, 0))
     return a * qolip_soni, b * qolip_soni
 
+
+def birlik_qollab_quvvatlanadimi(birlik):
+    """Birlik tizim tomonidan tan olinadimi (kg yoki litr o'lchamida)."""
+    b = (birlik or "").lower().strip()
+    return b in BIRLIK_KG or b in BIRLIK_LITR
+
+
+def birlik_bazasi(birlik):
+    """Birlik qaysi o'lchamga tegishli: 'kg', 'litr' yoki None."""
+    b = (birlik or "").lower().strip()
+    if b in BIRLIK_KG:
+        return "kg"
+    if b in BIRLIK_LITR:
+        return "litr"
+    return None
+
 ROLLAR = {
     "superadmin": "Super Admin",
     "direktor": "Direktor",

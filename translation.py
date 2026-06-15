@@ -339,9 +339,12 @@ async def say(message: Message, text: str, **kwargs):
     """
     Matnni foydalanuvchi tiliga tarjima qilib yuborish.
     reply_markup va boshqa argumentlar to'g'ridan-to'g'ri uzatiladi.
+    Telegram 4096 belgi chegarasidan oshsa, xavfsiz kesadi.
     """
     user_id = message.from_user.id if message.from_user else 0
     tarjima = await t(text, user_id)
+    if tarjima and len(tarjima) > 4096:
+        tarjima = tarjima[:4095] + "…"
     return await message.answer(tarjima, **kwargs)
 
 

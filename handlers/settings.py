@@ -114,8 +114,17 @@ async def material_qoldiq(message: Message, state: FSMContext):
 @router.message(MaterialState.birlik)
 async def material_birlik(message: Message, state: FSMContext):
     try:
-        data = await state.get_data()
         birlik = message.text.strip()
+        if not db.birlik_qollab_quvvatlanadimi(birlik):
+            await say(
+                message,
+                "❌ Birlik tanilmadi!\n"
+                "Og'irlik: tonna, kg, g, gramm, mg, meshok\n"
+                "Hajm: litr, ml, m3, kubometr\n\n"
+                "Qaytadan kiriting:"
+            )
+            return
+        data = await state.get_data()
         await db.add_material(data["nomi"], data["qoldiq"], birlik)
 
         user = await db.get_user(message.from_user.id)
@@ -237,8 +246,17 @@ async def material_tahrirlash_qoldiq(message: Message, state: FSMContext):
 @router.message(MaterialEditState.birlik)
 async def material_tahrirlash_birlik(message: Message, state: FSMContext):
     try:
-        data = await state.get_data()
         birlik = message.text.strip()
+        if not db.birlik_qollab_quvvatlanadimi(birlik):
+            await say(
+                message,
+                "❌ Birlik tanilmadi!\n"
+                "Og'irlik: tonna, kg, g, gramm, mg, meshok\n"
+                "Hajm: litr, ml, m3, kubometr\n\n"
+                "Qaytadan kiriting:"
+            )
+            return
+        data = await state.get_data()
         await db.update_material(
             data["material_id"],
             data["nomi"],
@@ -423,6 +441,16 @@ async def formula_birlik(message: Message, state: FSMContext):
         miqdor = data["miqdor"]
         birlik = message.text.strip()
         m = materials[index]
+        # Birlik material o'lchamiga (kg/litr) mos kelishini tekshiramiz
+        if (not db.birlik_qollab_quvvatlanadimi(birlik)
+                or db.birlik_bazasi(birlik) != db.birlik_bazasi(m[4])):
+            await say(
+                message,
+                f"❌ Birlik '{m[1]}' o'lchamiga mos emas "
+                f"(ombor birligi: {m[4]}).\n"
+                f"Bir xil o'lchamdagi birlik kiriting. Qaytadan:"
+            )
+            return
         await db.add_qolip_formula(m[0], miqdor, birlik)
         index += 1
         if index < len(materials):
