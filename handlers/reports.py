@@ -1,28 +1,28 @@
-from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, BufferedInputFile
+from aiogram import Router
+from aiogram.types import Message, BufferedInputFile
 from datetime import timedelta, timezone
 import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 import database as db
+from translation import Tkey, say, build_keyboard, t
 
 # GMT+5 timezone
 TOSHKENT_TZ = timezone(timedelta(hours=5))
 
 router = Router()
 
-def reports_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📊 Kunlik hisobot")],
-            [KeyboardButton(text="📊 Haftalik hisobot")],
-            [KeyboardButton(text="📊 Oylik hisobot")],
-            [KeyboardButton(text="📊 Tafsilotli hisobot")],
-            [KeyboardButton(text="📥 Excel hisobot")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
+
+async def reports_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["📊 Kunlik hisobot"],
+        ["📊 Haftalik hisobot"],
+        ["📊 Oylik hisobot"],
+        ["📊 Tafsilotli hisobot"],
+        ["📥 Excel hisobot"],
+        ["🏠 Asosiy menyu"],
+    ])
+
 
 def hisobla_production(logs):
     s1 = s2 = s3 = 0
@@ -35,10 +35,12 @@ def hisobla_production(logs):
     B_blok = s2 * 24 + s3 * 2
     return jami_qolip, A_blok, B_blok, s1, s2, s3
 
+
 def hisobla_sales(logs):
     A = sum(log[2] for log in logs if log[1] == "A")
     B = sum(log[2] for log in logs if log[1] == "B")
     return A, B
+
 
 async def ombor_holati():
     try:
@@ -52,6 +54,7 @@ async def ombor_holati():
         return text
     except Exception:
         return "   Xatolik\n"
+
 
 async def tayyor_holati():
     try:
@@ -67,6 +70,7 @@ async def tayyor_holati():
         return text
     except Exception:
         return "   Xatolik\n"
+
 
 async def hisobot_matni(boshliq, oxiri, sarlavha):
     try:
@@ -95,31 +99,36 @@ async def hisobot_matni(boshliq, oxiri, sarlavha):
     except Exception as e:
         return f"❌ Hisobot xatoligi: {str(e)}"
 
-@router.message(F.text == "📊 Hisobot")
-async def hisobot(message: Message):
-    await message.answer("📊 Hisobotlar:", reply_markup=reports_menu())
 
-@router.message(F.text == "📊 Kunlik hisobot")
+@router.message(Tkey("📊 Hisobot"))
+async def hisobot(message: Message):
+    await say(message, "📊 Hisobotlar:", reply_markup=await reports_menu(message.from_user.id))
+
+
+@router.message(Tkey("📊 Kunlik hisobot"))
 async def kunlik_hisobot(message: Message):
     bugun = db.bugungi_sana()
     text = await hisobot_matni(bugun, bugun, "📊 Kunlik hisobot")
-    await message.answer(text, reply_markup=reports_menu())
+    await say(message, text, reply_markup=await reports_menu(message.from_user.id))
 
-@router.message(F.text == "📊 Haftalik hisobot")
+
+@router.message(Tkey("📊 Haftalik hisobot"))
 async def haftalik_hisobot(message: Message):
     bugun = db.bugungi_sana()
     boshliq = bugun - timedelta(days=7)
     text = await hisobot_matni(boshliq, bugun, "📊 Haftalik hisobot")
-    await message.answer(text, reply_markup=reports_menu())
+    await say(message, text, reply_markup=await reports_menu(message.from_user.id))
 
-@router.message(F.text == "📊 Oylik hisobot")
+
+@router.message(Tkey("📊 Oylik hisobot"))
 async def oylik_hisobot(message: Message):
     bugun = db.bugungi_sana()
     boshliq = bugun.replace(day=1)
     text = await hisobot_matni(boshliq, bugun, "📊 Oylik hisobot")
-    await message.answer(text, reply_markup=reports_menu())
+    await say(message, text, reply_markup=await reports_menu(message.from_user.id))
 
-@router.message(F.text == "📊 Tafsilotli hisobot")
+
+@router.message(Tkey("📊 Tafsilotli hisobot"))
 async def tafsilotli_hisobot(message: Message):
     try:
         bugun = db.bugungi_sana()
@@ -141,7 +150,6 @@ async def tafsilotli_hisobot(message: Message):
                 vaqt = p["vaqt"]
                 # PostgreSQL vaqtini GMT+5 ga o'girish
                 if hasattr(vaqt, "strftime"):
-                    # Agar vaqt naive bo'lsa (timezone yo'q), GMT+0 deb hisoblab GMT+5 ga o'giramiz
                     if vaqt.tzinfo is None:
                         vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
                     vaqt_str = vaqt.strftime("%d.%m %H:%M")
@@ -160,7 +168,6 @@ async def tafsilotli_hisobot(message: Message):
         if sales_detail:
             for s in sales_detail[:10]:
                 vaqt = s["vaqt"]
-                # PostgreSQL vaqtini GMT+5 ga o'girish
                 if hasattr(vaqt, "strftime"):
                     if vaqt.tzinfo is None:
                         vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
@@ -191,11 +198,12 @@ async def tafsilotli_hisobot(message: Message):
 
         if len(text) > 4000:
             text = text[:4000] + "\n..."
-        await message.answer(text, reply_markup=reports_menu())
+        await say(message, text, reply_markup=await reports_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
 
-@router.message(F.text == "📥 Excel hisobot")
+
+@router.message(Tkey("📥 Excel hisobot"))
 async def excel_hisobot(message: Message):
     try:
         bugun = db.bugungi_sana()
@@ -240,7 +248,7 @@ async def excel_hisobot(message: Message):
             s1, s2, s3 = counts
             A = s1 * 12 + s3 * 11
             B = s2 * 24 + s3 * 2
-            ws1.append([sana, s1, s2, s3, s1+s2+s3, A, B])
+            ws1.append([sana, s1, s2, s3, s1 + s2 + s3, A, B])
 
         # 2. Ishlab chiqarish tafsiloti (kim kiritdi)
         ws2 = wb.create_sheet("Ishlab chiqarish (tafsilot)")
@@ -249,7 +257,6 @@ async def excel_hisobot(message: Message):
         ws2.column_dimensions["B"].width = 16
         for p in prod_detail:
             vaqt = p["vaqt"]
-            # GMT+5 ga o'girish
             if hasattr(vaqt, "strftime"):
                 if vaqt.tzinfo is None:
                     vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
@@ -284,7 +291,6 @@ async def excel_hisobot(message: Message):
         ws4.column_dimensions["B"].width = 16
         for s in sales_detail:
             vaqt = s["vaqt"]
-            # GMT+5 ga o'girish
             if hasattr(vaqt, "strftime"):
                 if vaqt.tzinfo is None:
                     vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
@@ -323,7 +329,6 @@ async def excel_hisobot(message: Message):
         ws7.column_dimensions["E"].width = 40
         for log in audit_logs:
             vaqt = log["vaqt"]
-            # GMT+5 ga o'girish
             if hasattr(vaqt, "strftime"):
                 if vaqt.tzinfo is None:
                     vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
@@ -337,22 +342,26 @@ async def excel_hisobot(message: Message):
         buffer.seek(0)
 
         fayl_nomi = f"gazobot_{boshliq}_{bugun}.xlsx"
+        caption = await t(
+            f"📥 Excel hisobot\n📅 {boshliq} — {bugun}\n"
+            f"7 ta varaq: Ishlab chiqarish, Tafsilot, "
+            f"Sotuv, Sotuv tafsilot, Xom ashyo, Ombor, Audit",
+            message.from_user.id
+        )
         await message.answer_document(
             BufferedInputFile(buffer.read(), filename=fayl_nomi),
-            caption=(
-                f"📥 Excel hisobot\n📅 {boshliq} — {bugun}\n"
-                f"7 ta varaq: Ishlab chiqarish, Tafsilot, "
-                f"Sotuv, Sotuv tafsilot, Xom ashyo, Ombor, Audit"
-            )
+            caption=caption
         )
     except Exception as e:
-        await message.answer(f"❌ Excel xatoligi: {str(e)}")
+        await say(message, f"❌ Excel xatoligi: {str(e)}")
+
 
 async def avtomatik_hisobot(bot, chat_id):
     try:
         bugun = db.bugungi_sana()
         text = await hisobot_matni(bugun, bugun, "🔔 Avtomatik kunlik hisobot")
+        # Admin tilida yuborish (chat_id = admin user_id)
+        text = await t(text, chat_id)
         await bot.send_message(chat_id, text)
     except Exception as e:
         print(f"Avtomatik hisobot xatoligi: {e}")
-

@@ -1,44 +1,51 @@
-from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram import Router
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
+from translation import Tkey, eq, canon, say, build_keyboard
 
 router = Router()
+
+# Blok turi tugmalari (kanonik o'zbekcha)
+BLOCK_BUTTONS = {
+    "A blok (60×20×30)": "A",
+    "B blok (60×10×30)": "B",
+}
+
 
 class SalesState(StatesGroup):
     block_type = State()
     miqdor = State()
 
-def sales_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="💰 Sotuv kiritish")],
-            [KeyboardButton(text="📋 Bugungi sotuv")],
-            [KeyboardButton(text="🗑️ Oxirgi sotuvni o'chirish")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
 
-def block_type_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="A blok (60×20×30)")],
-            [KeyboardButton(text="B blok (60×10×30)")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
+async def sales_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["💰 Sotuv kiritish"],
+        ["📋 Bugungi sotuv"],
+        ["🗑️ Oxirgi sotuvni o'chirish"],
+        ["🏠 Asosiy menyu"],
+    ])
 
-@router.message(F.text == "💰 Sotuv")
+
+async def block_type_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["A blok (60×20×30)"],
+        ["B blok (60×10×30)"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+@router.message(Tkey("💰 Sotuv"))
 async def sotuv(message: Message):
-    await message.answer(
+    await say(
+        message,
         "💰 Sotuv bo'limi:",
-        reply_markup=sales_menu()
+        reply_markup=await sales_menu(message.from_user.id)
     )
 
-@router.message(F.text == "💰 Sotuv kiritish")
+
+@router.message(Tkey("💰 Sotuv kiritish"))
 async def sotuv_kiritish(message: Message, state: FSMContext):
     try:
         goods = await db.get_finished_goods()
@@ -47,29 +54,33 @@ async def sotuv_kiritish(message: Message, state: FSMContext):
         for g in goods:
             text += f"   {g[0]} blok: {g[1]} ta\n"
         await state.set_state(SalesState.block_type)
-        await message.answer(text, reply_markup=block_type_menu())
+        await say(message, text, reply_markup=await block_type_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}", reply_markup=sales_menu())
+        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await sales_menu(message.from_user.id))
+
 
 @router.message(SalesState.block_type)
 async def sotuv_block_type(message: Message, state: FSMContext):
-    if message.text == "🏠 Asosiy menyu":
+    if await eq(message, "🏠 Asosiy menyu"):
         await state.clear()
         return
-    if message.text not in ["A blok (60×20×30)", "B blok (60×10×30)"]:
-        await message.answer("❌ Tugmalardan birini tanlang!")
+    uz = await canon(message, list(BLOCK_BUTTONS.keys()))
+    if not uz:
+        await say(message, "❌ Tugmalardan birini tanlang!")
         return
-    block_type = "A" if "A blok" in message.text else "B"
+    block_type = BLOCK_BUTTONS[uz]
     await state.update_data(block_type=block_type)
     await state.set_state(SalesState.miqdor)
 
     goods = await db.get_finished_goods()
     qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
-    await message.answer(
+    await say(
+        message,
         f"📦 {block_type} blokdan nechta sotildi?\n"
         f"Mavjud: {qoldiq} ta\n\n"
         f"Misol: 100"
     )
+
 
 @router.message(SalesState.miqdor)
 async def sotuv_miqdor(message: Message, state: FSMContext):
@@ -89,7 +100,7 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
         await state.clear()
 
         if not muvaffaqiyat:
-            await message.answer(xabar, reply_markup=sales_menu())
+            await say(message, xabar, reply_markup=await sales_menu(user_id))
             return
 
         # Audit log
@@ -106,23 +117,26 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
         goods = await db.get_finished_goods()
         yangi_qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
 
-        await message.answer(
+        await say(
+            message,
             f"✅ Sotuv kiritildi!\n\n"
             f"🧱 {block_type} blok: {miqdor} ta sotildi\n"
             f"📦 Qoldi: {yangi_qoldiq} ta",
-            reply_markup=sales_menu()
+            reply_markup=await sales_menu(user_id)
         )
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 100")
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 100")
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sales_menu()
+            reply_markup=await sales_menu(message.from_user.id)
         )
 
+
 # ── Oxirgi sotuvni o'chirish ──
-@router.message(F.text == "🗑️ Oxirgi sotuvni o'chirish")
+@router.message(Tkey("🗑️ Oxirgi sotuvni o'chirish"))
 async def oxirgi_sotuv_ochirish(message: Message):
     try:
         user = await db.get_user(message.from_user.id)
@@ -135,33 +149,38 @@ async def oxirgi_sotuv_ochirish(message: Message):
                 "Sotuv o'chirildi",
                 "Oxirgi sotuv yozuvi o'chirildi va omborga qaytarildi"
             )
-            await message.answer(
+            await say(
+                message,
                 "✅ Oxirgi sotuv o'chirildi!\n"
                 "📦 Mahsulot omborga qaytarildi.",
-                reply_markup=sales_menu()
+                reply_markup=await sales_menu(message.from_user.id)
             )
         else:
-            await message.answer(
+            await say(
+                message,
                 "❌ O'chiriladigan yozuv yo'q!",
-                reply_markup=sales_menu()
+                reply_markup=await sales_menu(message.from_user.id)
             )
     except Exception as e:
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sales_menu()
+            reply_markup=await sales_menu(message.from_user.id)
         )
 
+
 # ── Bugungi sotuv ──
-@router.message(F.text == "📋 Bugungi sotuv")
+@router.message(Tkey("📋 Bugungi sotuv"))
 async def bugungi_sotuv(message: Message):
     try:
         bugun = db.bugungi_sana()
         logs = await db.get_sales_by_date(bugun)
 
         if not logs:
-            await message.answer(
+            await say(
+                message,
                 "📋 Bugun hali sotuv kiritilmagan.",
-                reply_markup=sales_menu()
+                reply_markup=await sales_menu(message.from_user.id)
             )
             return
 
@@ -181,9 +200,10 @@ async def bugungi_sotuv(message: Message):
             f"🏬 Tayyor mahsulot qoldig'i:\n"
             f"{qoldiq_text}"
         )
-        await message.answer(text, reply_markup=sales_menu())
+        await say(message, text, reply_markup=await sales_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sales_menu()
-)
+            reply_markup=await sales_menu(message.from_user.id)
+        )

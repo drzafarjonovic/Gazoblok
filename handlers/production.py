@@ -1,53 +1,74 @@
-from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram import Router
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
+from translation import Tkey, eq, say, build_keyboard, foydalanuvchi_tili, tarjima_qil, t
 
 router = Router()
+
+# Shablon tugmalarining statik qismi (kanonik o'zbekcha)
+SHABLON_LABEL = {
+    1: "📦 Shablon 1 — 12A",
+    2: "📦 Shablon 2 — 24B",
+    3: "📦 Shablon 3 — 11A+2B",
+}
+
 
 class ProductionState(StatesGroup):
     shablon_tanlash = State()
     miqdor_kiritish = State()
 
-def production_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🏭 Ishlab chiqarishni kiritish")],
-            [KeyboardButton(text="📋 Bugungi ishlab chiqarish")],
-            [KeyboardButton(text="🗑️ Oxirgi yozuvni o'chirish")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
 
-def shablon_menu(kiritilganlar):
-    """Kiritilgan shablonlarni ko'rsatib, tugmalar chiqaradi"""
-    s1 = kiritilganlar.get(1, 0)
-    s2 = kiritilganlar.get(2, 0)
-    s3 = kiritilganlar.get(3, 0)
+async def production_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["🏭 Ishlab chiqarishni kiritish"],
+        ["📋 Bugungi ishlab chiqarish"],
+        ["🗑️ Oxirgi yozuvni o'chirish"],
+        ["🏠 Asosiy menyu"],
+    ])
 
-    keyboard = [
-        [KeyboardButton(text=f"📦 Shablon 1 — 12A ({s1} qolip)")],
-        [KeyboardButton(text=f"📦 Shablon 2 — 24B ({s2} qolip)")],
-        [KeyboardButton(text=f"📦 Shablon 3 — 11A+2B ({s3} qolip)")],
-        [KeyboardButton(text="✅ Tayyor — Saqlash")],
-        [KeyboardButton(text="❌ Bekor qilish")],
-    ]
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-@router.message(F.text == "🏭 Ishlab chiqarish")
+async def shablon_menu(user_id, kiritilganlar):
+    """Kiritilgan shablonlarni ko'rsatib, tarjima qilingan tugmalar chiqaradi."""
+    til = await foydalanuvchi_tili(user_id)
+    qolip_so = "qolip" if til == "uz" else await tarjima_qil("qolip", til)
+    rows = []
+    for n in (1, 2, 3):
+        soni = kiritilganlar.get(n, 0)
+        label = SHABLON_LABEL[n] if til == "uz" else await tarjima_qil(SHABLON_LABEL[n], til)
+        rows.append([f"{label} ({soni} {qolip_so})"])
+    rows.append(["✅ Tayyor — Saqlash"])
+    rows.append(["❌ Bekor qilish"])
+    return await build_keyboard(user_id, rows)
+
+
+async def _shablon_aniqla(message: Message):
+    """Kelgan matn qaysi shablonga tegishli ekanini aniqlaydi (til-aware)."""
+    til = await foydalanuvchi_tili(message.from_user.id)
+    text = message.text or ""
+    for n in (1, 2, 3):
+        label = SHABLON_LABEL[n] if til == "uz" else await tarjima_qil(SHABLON_LABEL[n], til)
+        if label in text:
+            return n
+    return None
+
+
+@router.message(Tkey("🏭 Ishlab chiqarish"))
 async def production(message: Message):
-    await message.answer(
+    await say(
+        message,
         "🏭 Ishlab chiqarish bo'limi:",
-        reply_markup=production_menu()
+        reply_markup=await production_menu(message.from_user.id)
     )
 
-@router.message(F.text == "🏭 Ishlab chiqarishni kiritish")
+
+@router.message(Tkey("🏭 Ishlab chiqarishni kiritish"))
 async def production_kiritish(message: Message, state: FSMContext):
     formula = await db.get_qolip_formula()
     if not formula:
-        await message.answer(
+        await say(
+            message,
             "❌ Avval qolip formulasini kiriting!\n"
             "⚙️ Sozlamalar → 📋 Qolip formulasi"
         )
@@ -57,27 +78,30 @@ async def production_kiritish(message: Message, state: FSMContext):
     await state.update_data(kiritilganlar={})
     await state.set_state(ProductionState.shablon_tanlash)
 
-    await message.answer(
+    await say(
+        message,
         "📦 Qaysi shablondan nechta qolip quyildi?\n\n"
         "Shablonni tanlang va miqdor kiriting.\n"
         "Bir necha shablon kiritsa ham bo'ladi.\n"
         "Oxirida ✅ Tayyor bosing.",
-        reply_markup=shablon_menu({})
+        reply_markup=await shablon_menu(message.from_user.id, {})
     )
+
 
 @router.message(ProductionState.shablon_tanlash)
 async def shablon_tanlash(message: Message, state: FSMContext):
-    text = message.text
+    user_id = message.from_user.id
 
-    if text == "❌ Bekor qilish":
+    if await eq(message, "❌ Bekor qilish"):
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             "❌ Bekor qilindi.",
-            reply_markup=production_menu()
+            reply_markup=await production_menu(user_id)
         )
         return
 
-    if text == "✅ Tayyor — Saqlash":
+    if await eq(message, "✅ Tayyor — Saqlash"):
         data = await state.get_data()
         kiritilganlar = data.get("kiritilganlar", {})
 
@@ -87,10 +111,11 @@ async def shablon_tanlash(message: Message, state: FSMContext):
         jami_qolip = s1 + s2 + s3
 
         if jami_qolip == 0:
-            await message.answer(
+            await say(
+                message,
                 "❌ Hech qolip kiritilmadi!\n"
                 "Avval shablon tanlang.",
-                reply_markup=shablon_menu({})
+                reply_markup=await shablon_menu(user_id, {})
             )
             return
 
@@ -100,13 +125,12 @@ async def shablon_tanlash(message: Message, state: FSMContext):
             await state.clear()
             text = "⛔ Ishlab chiqarish mumkin emas!\nMateriallar yetarli emas:\n\n"
             text += "\n".join(yetishmaydi)
-            await message.answer(text, reply_markup=production_menu())
+            await say(message, text, reply_markup=await production_menu(user_id))
             return
 
         A_blok = s1 * 12 + s3 * 11
         B_blok = s2 * 24 + s3 * 2
         bugun = db.bugungi_sana()
-        user_id = message.from_user.id
 
         # Bazaga yozish
         prod_ids = []
@@ -138,12 +162,12 @@ async def shablon_tanlash(message: Message, state: FSMContext):
             yangi_qoldiq = max(0.0, qoldiq_asosiy - ketgan_asosiy)
             await db.update_material_qoldiq(material_id, yangi_qoldiq)
 
-            # Chiqim log
+            # Chiqim log (asosiy birlikda — asl_birlik turiga mos)
             for pid, shablon, qolip_soni in prod_ids:
                 ketgan_bu_log = miqdor_asosiy * qolip_soni
                 await db.add_material_chiqim_log(
                     pid, material_id, nomi,
-                    ketgan_bu_log, "kg", bugun
+                    ketgan_bu_log, asl_birlik, bugun
                 )
 
             ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
@@ -190,24 +214,20 @@ async def shablon_tanlash(message: Message, state: FSMContext):
             f"   B blok: +{B_blok} ta\n\n"
             f"📉 Sarflangan:\n{sarflar_text}"
         )
-        await message.answer(result, reply_markup=production_menu())
+        await say(message, result, reply_markup=await production_menu(user_id))
 
         if ogohlantirish:
-            await message.answer("\n\n".join(ogohlantirish))
+            await say(message, "\n\n".join(ogohlantirish))
         return
 
     # Shablon tanlash
-    if "Shablon 1" in text:
-        shablon = 1
-    elif "Shablon 2" in text:
-        shablon = 2
-    elif "Shablon 3" in text:
-        shablon = 3
-    else:
-        await message.answer(
+    shablon = await _shablon_aniqla(message)
+    if shablon is None:
+        await say(
+            message,
             "❌ Tugmalardan birini tanlang!",
-            reply_markup=shablon_menu(
-                (await state.get_data()).get("kiritilganlar", {})
+            reply_markup=await shablon_menu(
+                user_id, (await state.get_data()).get("kiritilganlar", {})
             )
         )
         return
@@ -223,11 +243,13 @@ async def shablon_tanlash(message: Message, state: FSMContext):
     data = await state.get_data()
     joriy = data.get("kiritilganlar", {}).get(shablon, 0)
 
-    await message.answer(
+    await say(
+        message,
         f"📦 {shablon_info[shablon]}\n\n"
         f"Nechta qolip? (Hozir: {joriy} ta)\n"
         f"Misol: 5"
     )
+
 
 @router.message(ProductionState.miqdor_kiritish)
 async def miqdor_kiritish(message: Message, state: FSMContext):
@@ -264,19 +286,21 @@ async def miqdor_kiritish(message: Message, state: FSMContext):
             f"   A blok: {A_blok} ta | B blok: {B_blok} ta\n\n"
             f"Yana shablon qo'shing yoki ✅ Tayyor bosing."
         )
-        await message.answer(status, reply_markup=shablon_menu(kiritilganlar))
+        await say(message, status, reply_markup=await shablon_menu(message.from_user.id, kiritilganlar))
 
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 5")
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 5")
 
-@router.message(F.text == "📋 Bugungi ishlab chiqarish")
+
+@router.message(Tkey("📋 Bugungi ishlab chiqarish"))
 async def bugungi_production(message: Message):
     bugun = db.bugungi_sana()
     logs = await db.get_production_by_date(bugun)
     if not logs:
-        await message.answer(
+        await say(
+            message,
             "📋 Bugun hali ishlab chiqarish kiritilmagan.",
-            reply_markup=production_menu()
+            reply_markup=await production_menu(message.from_user.id)
         )
         return
 
@@ -298,9 +322,10 @@ async def bugungi_production(message: Message):
         f"   A blok: {A_blok} ta\n"
         f"   B blok: {B_blok} ta\n"
     )
-    await message.answer(text, reply_markup=production_menu())
+    await say(message, text, reply_markup=await production_menu(message.from_user.id))
 
-@router.message(F.text == "🗑️ Oxirgi yozuvni o'chirish")
+
+@router.message(Tkey("🗑️ Oxirgi yozuvni o'chirish"))
 async def oxirgi_ochirish(message: Message):
     try:
         user = await db.get_user(message.from_user.id)
@@ -313,14 +338,16 @@ async def oxirgi_ochirish(message: Message):
                 "Ishlab chiqarish o'chirildi",
                 tafsilot
             )
-            await message.answer(
+            await say(
+                message,
                 f"✅ Oxirgi yozuv o'chirildi!\n\n{tafsilot}",
-                reply_markup=production_menu()
+                reply_markup=await production_menu(message.from_user.id)
             )
         else:
-            await message.answer(tafsilot, reply_markup=production_menu())
+            await say(message, tafsilot, reply_markup=await production_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=production_menu()
+            reply_markup=await production_menu(message.from_user.id)
         )
