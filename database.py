@@ -42,6 +42,19 @@ def asosiydan_birlikga(miqdor_asosiy, birlik):
         return miqdor_asosiy / BIRLIK_LITR[b]
     return miqdor_asosiy
 
+# ── Shablon → blok hisobi (markazlashtirilgan, DRY) ──
+# Har bir shablon 1 qolipdan nechta A va B blok beradi
+SHABLON_BLOK = {
+    1: (12, 0),    # Shablon 1: 12 A
+    2: (0, 24),    # Shablon 2: 24 B
+    3: (11, 2),    # Shablon 3: 11 A + 2 B
+}
+
+def shablon_bloklari(shablon, qolip_soni):
+    """Berilgan shablon va qolip soni uchun (A_blok, B_blok) qaytaradi."""
+    a, b = SHABLON_BLOK.get(shablon, (0, 0))
+    return a * qolip_soni, b * qolip_soni
+
 ROLLAR = {
     "superadmin": "Super Admin",
     "direktor": "Direktor",
@@ -587,118 +600,214 @@ async def add_production_log(sana, shablon, qolip_soni, user_id=None):
         """, sana_str, shablon, qolip_soni, user_id)
         return row["id"]
 
+
+async def add_production(kiritilganlar: dict, user_id):
+    """
+    Ishlab chiqarishni TO'LIQ atomik tranzaksiyada kiritadi:
+    materiallarni qulflab (FOR UPDATE) tekshiradi, kamaytiradi,
+    tayyor mahsulotga qo'shadi, chiqim log va audit yozadi.
+
+    Args:
+        kiritilganlar: {shablon: qolip_soni}
+        user_id: kim kiritmoqda
+
+    Returns:
+        (True, payload_dict) muvaffaqiyatda,
+        (False, {"yetishmaydi": [...]}) material yetishmasa.
+    """
+    s1 = int(kiritilganlar.get(1, 0))
+    s2 = int(kiritilganlar.get(2, 0))
+    s3 = int(kiritilganlar.get(3, 0))
+    jami_qolip = s1 + s2 + s3
+    if jami_qolip <= 0:
+        return False, {"yetishmaydi": [], "bosh": True}
+
+    a1, b1 = shablon_bloklari(1, s1)
+    a3, b3 = shablon_bloklari(3, s3)
+    a2, b2 = shablon_bloklari(2, s2)
+    A_blok = a1 + a3 + a2
+    B_blok = b1 + b3 + b2
+
+    bugun = bugungi_sana()
+    sana_str = bugun.isoformat()
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            # Formula + materiallarni QULFLAB o'qiymiz (race-condition oldini olish)
+            formula = await conn.fetch("""
+                SELECT m.id, m.nomi, m.qoldiq, m.asl_birlik, q.miqdor_asosiy
+                FROM qolip_formula q
+                JOIN materials m ON q.material_id = m.id
+                FOR UPDATE OF m
+            """)
+            if not formula:
+                return False, {"yetishmaydi": [], "formula_yoq": True}
+
+            # Yetarlilikni tranzaksiya ichida qayta tekshiramiz
+            yetishmaydi = []
+            for f in formula:
+                kerak = f["miqdor_asosiy"] * jami_qolip
+                if f["qoldiq"] < kerak:
+                    asl = f["asl_birlik"]
+                    yetishmaydi.append({
+                        "nomi": f["nomi"],
+                        "kerak_asl": asosiydan_birlikga(kerak, asl),
+                        "bor_asl": asosiydan_birlikga(f["qoldiq"], asl),
+                        "birlik": asl,
+                    })
+            if yetishmaydi:
+                return False, {"yetishmaydi": yetishmaydi}
+
+            # Ishlab chiqarish yozuvlari
+            prod_ids = []
+            for shablon, soni in ((1, s1), (2, s2), (3, s3)):
+                if soni > 0:
+                    r = await conn.fetchrow("""
+                        INSERT INTO production_log (sana, shablon, qolip_soni, user_id)
+                        VALUES ($1, $2, $3, $4) RETURNING id
+                    """, sana_str, shablon, soni, user_id)
+                    prod_ids.append((r["id"], shablon, soni))
+
+            # Minimum chegaralar
+            min_rows = await conn.fetch("SELECT material_id, min_chegara FROM settings")
+            min_map = {r["material_id"]: r["min_chegara"] for r in min_rows}
+
+            sarflar = []
+            ogohlantirish = []
+            for f in formula:
+                material_id = f["id"]
+                nomi = f["nomi"]
+                asl = f["asl_birlik"]
+                miqdor_asosiy = f["miqdor_asosiy"]
+                ketgan_asosiy = miqdor_asosiy * jami_qolip
+
+                # ATOMIK kamaytirish (qulflangan, shuning uchun manfiy bo'lmaydi)
+                new_row = await conn.fetchrow(
+                    "UPDATE materials SET qoldiq = qoldiq - $1 WHERE id = $2 RETURNING qoldiq",
+                    ketgan_asosiy, material_id
+                )
+                yangi_qoldiq = new_row["qoldiq"]
+
+                # Chiqim log (har bir shablon uchun, to'g'ri birlikda)
+                for pid, shablon, soni in prod_ids:
+                    ketgan_bu = miqdor_asosiy * soni
+                    await conn.execute("""
+                        INSERT INTO material_chiqim_log
+                        (production_log_id, material_id, material_nomi, ketgan_miqdor, birlik, sana)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                    """, pid, material_id, nomi, ketgan_bu, asl, sana_str)
+
+                sarflar.append({
+                    "nomi": nomi,
+                    "ketgan_asl": asosiydan_birlikga(ketgan_asosiy, asl),
+                    "qoldiq_asl": asosiydan_birlikga(yangi_qoldiq, asl),
+                    "birlik": asl,
+                })
+
+                min_ch = min_map.get(material_id)
+                if min_ch and yangi_qoldiq <= min_ch:
+                    ogohlantirish.append({
+                        "nomi": nomi,
+                        "qoldiq_asl": asosiydan_birlikga(yangi_qoldiq, asl),
+                        "min_asl": asosiydan_birlikga(min_ch, asl),
+                        "birlik": asl,
+                    })
+
+            # Tayyor mahsulotga qo'shish (atomik)
+            if A_blok > 0:
+                await conn.execute(
+                    "UPDATE finished_goods SET qoldiq = qoldiq + $1 WHERE block_type='A'", A_blok
+                )
+            if B_blok > 0:
+                await conn.execute(
+                    "UPDATE finished_goods SET qoldiq = qoldiq + $1 WHERE block_type='B'", B_blok
+                )
+
+            # Audit log (xuddi shu tranzaksiyada)
+            urow = await conn.fetchrow("SELECT ism, rol FROM users WHERE id=$1", user_id)
+            await conn.execute("""
+                INSERT INTO audit_log (user_id, ism, rol, amal, tafsilot)
+                VALUES ($1, $2, $3, $4, $5)
+            """, user_id,
+                urow["ism"] if urow else str(user_id),
+                urow["rol"] if urow else "-",
+                "Ishlab chiqarish kiritildi",
+                f"Qolip: {jami_qolip} ta | A: {A_blok} ta | B: {B_blok} ta")
+
+    return True, {
+        "jami_qolip": jami_qolip,
+        "A_blok": A_blok, "B_blok": B_blok,
+        "s1": s1, "s2": s2, "s3": s3,
+        "sarflar": sarflar,
+        "ogohlantirish": ogohlantirish,
+    }
+
 async def delete_last_production_with_restore():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, shablon, qolip_soni FROM production_log ORDER BY id DESC LIMIT 1"
-        )
-        if not row:
-            return False, "❌ O'chiriladigan yozuv yo'q!"
-
-        prod_id = row["id"]
-        shablon = row["shablon"]
-        qolip_soni = row["qolip_soni"]
-
-        # Bloklar hisobi
-        if shablon == 1:
-            A_blok = qolip_soni * 12
-            B_blok = 0
-        elif shablon == 2:
-            A_blok = 0
-            B_blok = qolip_soni * 24
-        else:
-            A_blok = qolip_soni * 11
-            B_blok = qolip_soni * 2
-
-        # Tayyor mahsulot omboridan AYIRISH
-        if A_blok > 0:
-            await conn.execute(
-                "UPDATE finished_goods SET qoldiq=GREATEST(0, qoldiq-$1) WHERE block_type='A'",
-                A_blok
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT id, shablon, qolip_soni FROM production_log ORDER BY id DESC LIMIT 1"
             )
-        if B_blok > 0:
-            await conn.execute(
-                "UPDATE finished_goods SET qoldiq=GREATEST(0, qoldiq-$1) WHERE block_type='B'",
-                B_blok
+            if not row:
+                return False, "❌ O'chiriladigan yozuv yo'q!"
+
+            prod_id = row["id"]
+            shablon = row["shablon"]
+            qolip_soni = row["qolip_soni"]
+
+            # Bloklar hisobi (markazlashtirilgan)
+            A_blok, B_blok = shablon_bloklari(shablon, qolip_soni)
+
+            # Tayyor mahsulot omboridan AYIRISH
+            if A_blok > 0:
+                await conn.execute(
+                    "UPDATE finished_goods SET qoldiq=GREATEST(0, qoldiq-$1) WHERE block_type='A'",
+                    A_blok
+                )
+            if B_blok > 0:
+                await conn.execute(
+                    "UPDATE finished_goods SET qoldiq=GREATEST(0, qoldiq-$1) WHERE block_type='B'",
+                    B_blok
+                )
+
+            # Chiqim logdan materiallarni topib omborga qaytarish
+            chiqim_logs = await conn.fetch(
+                "SELECT material_id, material_nomi, ketgan_miqdor, birlik "
+                "FROM material_chiqim_log WHERE production_log_id=$1",
+                prod_id
             )
 
-        # Chiqim logdan materiallarni topib omborga qaytarish
-        chiqim_logs = await conn.fetch(
-            "SELECT material_id, material_nomi, ketgan_miqdor FROM material_chiqim_log WHERE production_log_id=$1",
-            prod_id
-        )
-
-        qaytarilgan = []
-        for ch in chiqim_logs:
-            await conn.execute(
-                "UPDATE materials SET qoldiq=qoldiq+$1 WHERE id=$2",
-                ch["ketgan_miqdor"], ch["material_id"]
-            )
-            mat = await conn.fetchrow(
-                "SELECT asl_birlik FROM materials WHERE id=$1", ch["material_id"]
-            )
-            if mat:
-                asl = mat["asl_birlik"]
-                asl_miqdor = __import__('database').asosiydan_birlikga(ch["ketgan_miqdor"], asl)
+            qaytarilgan = []
+            for ch in chiqim_logs:
+                await conn.execute(
+                    "UPDATE materials SET qoldiq=qoldiq+$1 WHERE id=$2",
+                    ch["ketgan_miqdor"], ch["material_id"]
+                )
+                # Chiqim logdagi birlik (asl_birlik) bilan ko'rsatamiz
+                asl = ch["birlik"] or "kg"
+                asl_miqdor = asosiydan_birlikga(ch["ketgan_miqdor"], asl)
                 qaytarilgan.append(
                     f"   {ch['material_nomi']}: +{asl_miqdor:.2f} {asl}"
                 )
 
-        # Loglarni o'chirish
-        await conn.execute(
-            "DELETE FROM material_chiqim_log WHERE production_log_id=$1", prod_id
-        )
-        await conn.execute(
-            "DELETE FROM production_log WHERE id=$1", prod_id
-        )
-
-        tafsilot = f"Shablon {shablon}, {qolip_soni} qolip o'chirildi\n"
-        tafsilot += f"Tayyor ombordan ayirildi: A={A_blok}, B={B_blok}\n"
-        if qaytarilgan:
-            tafsilot += "Omborga qaytarildi:\n" + "\n".join(qaytarilgan)
-        else:
-            tafsilot += "(Chiqim tarixi topilmadi)"
-
-        return True, tafsilot
-        # Materiallarni omborga qaytarish
-        qaytarilgan = []
-        for ch in chiqim_logs:
-            material_id = ch["material_id"]
-            ketgan = ch["ketgan_miqdor"]
-            nomi = ch["material_nomi"]
-            birlik = ch["birlik"]
-
-            await conn.execute("""
-                UPDATE materials SET qoldiq = qoldiq + $1 WHERE id = $2
-            """, ketgan, material_id)
-
-            asl_birlik_row = await conn.fetchrow(
-                "SELECT asl_birlik FROM materials WHERE id=$1", material_id
+            # Loglarni o'chirish
+            await conn.execute(
+                "DELETE FROM material_chiqim_log WHERE production_log_id=$1", prod_id
             )
-            if asl_birlik_row:
-                asl_birlik = asl_birlik_row["asl_birlik"]
-                qaytarilgan_asl = asosiydan_birlikga(ketgan, asl_birlik)
-                qaytarilgan.append(
-                    f"   {nomi}: +{qaytarilgan_asl:.2f} {asl_birlik}"
-                )
+            await conn.execute(
+                "DELETE FROM production_log WHERE id=$1", prod_id
+            )
 
-        # Chiqim loglarini o'chirish
-        await conn.execute(
-            "DELETE FROM material_chiqim_log WHERE production_log_id=$1", prod_id
-        )
-        # Ishlab chiqarish yozuvini o'chirish
-        await conn.execute(
-            "DELETE FROM production_log WHERE id=$1", prod_id
-        )
+            tafsilot = f"Shablon {shablon}, {qolip_soni} qolip o'chirildi\n"
+            tafsilot += f"Tayyor ombordan ayirildi: A={A_blok}, B={B_blok}\n"
+            if qaytarilgan:
+                tafsilot += "Omborga qaytarildi:\n" + "\n".join(qaytarilgan)
+            else:
+                tafsilot += "(Chiqim tarixi topilmadi)"
 
-        tafsilot = f"Shablon {shablon}, {qolip_soni} qolip o'chirildi"
-        if qaytarilgan:
-            tafsilot += "\nOmborga qaytarildi:\n" + "\n".join(qaytarilgan)
-        else:
-            tafsilot += "\n(Chiqim tarixi topilmadi, materiallar qaytarilmadi)"
-
-        return True, tafsilot
+            return True, tafsilot
 
 async def get_production_by_date(sana):
     """sana: date object yoki str"""
@@ -743,46 +852,49 @@ async def get_production_detail_range(boshliq, oxiri):
 
 # ── Sotuv ──
 async def add_sales_log(sana, block_type, miqdor, user_id=None):
-    """sana: date object yoki str"""
+    """sana: date object yoki str. Atomik: FOR UPDATE bilan oshirib sotishni oldini oladi."""
     sana_str = sana.isoformat() if hasattr(sana, 'isoformat') else str(sana)
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT qoldiq FROM finished_goods WHERE block_type=$1", block_type
-        )
-        if not row:
-            return False, "❌ Blok turi topilmadi!"
-        joriy_qoldiq = row["qoldiq"]
-        if joriy_qoldiq < miqdor:
-            return False, (
-                f"❌ Tayyor mahsulot yetarli emas!\n"
-                f"   {block_type} blok: bor {joriy_qoldiq} ta, "
-                f"kerak {miqdor} ta"
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT qoldiq FROM finished_goods WHERE block_type=$1 FOR UPDATE",
+                block_type
             )
-        await conn.execute(
-            "INSERT INTO sales_log (sana,block_type,miqdor,user_id) VALUES ($1,$2,$3,$4)",
-            sana_str, block_type, miqdor, user_id
-        )
-        await conn.execute(
-            "UPDATE finished_goods SET qoldiq=qoldiq-$1 WHERE block_type=$2",
-            miqdor, block_type
-        )
-        return True, "✅ Sotuv kiritildi!"
+            if not row:
+                return False, "❌ Blok turi topilmadi!"
+            joriy_qoldiq = row["qoldiq"]
+            if joriy_qoldiq < miqdor:
+                return False, (
+                    f"❌ Tayyor mahsulot yetarli emas!\n"
+                    f"   {block_type} blok: bor {joriy_qoldiq} ta, "
+                    f"kerak {miqdor} ta"
+                )
+            await conn.execute(
+                "INSERT INTO sales_log (sana,block_type,miqdor,user_id) VALUES ($1,$2,$3,$4)",
+                sana_str, block_type, miqdor, user_id
+            )
+            await conn.execute(
+                "UPDATE finished_goods SET qoldiq=qoldiq-$1 WHERE block_type=$2",
+                miqdor, block_type
+            )
+            return True, "✅ Sotuv kiritildi!"
 
 async def delete_last_sale():
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, block_type, miqdor FROM sales_log ORDER BY id DESC LIMIT 1"
-        )
-        if row:
-            await conn.execute("DELETE FROM sales_log WHERE id=$1", row["id"])
-            await conn.execute(
-                "UPDATE finished_goods SET qoldiq=qoldiq+$1 WHERE block_type=$2",
-                row["miqdor"], row["block_type"]
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT id, block_type, miqdor FROM sales_log ORDER BY id DESC LIMIT 1 FOR UPDATE"
             )
-            return True
-        return False
+            if row:
+                await conn.execute("DELETE FROM sales_log WHERE id=$1", row["id"])
+                await conn.execute(
+                    "UPDATE finished_goods SET qoldiq=qoldiq+$1 WHERE block_type=$2",
+                    row["miqdor"], row["block_type"]
+                )
+                return True
+            return False
 
 async def get_sales_by_date(sana):
     """sana: date object yoki str"""

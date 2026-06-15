@@ -108,119 +108,61 @@ async def shablon_tanlash(message: Message, state: FSMContext):
         data = await state.get_data()
         kiritilganlar = data.get("kiritilganlar", {})
 
-        s1 = kiritilganlar.get(1, 0)
-        s2 = kiritilganlar.get(2, 0)
-        s3 = kiritilganlar.get(3, 0)
-        jami_qolip = s1 + s2 + s3
+        # Butun jarayon bitta atomik tranzaksiyada (race-condition'siz)
+        ok, payload = await db.add_production(kiritilganlar, user_id)
 
-        if jami_qolip == 0:
-            await say(
-                message,
-                "❌ Hech qolip kiritilmadi!\n"
-                "Avval shablon tanlang.",
-                reply_markup=await shablon_menu(user_id, {})
-            )
-            return
-
-        # Material tekshiruvi
-        yetishmaydi = await db.check_material_yetarli(jami_qolip)
-        if yetishmaydi:
+        if not ok:
+            if payload.get("bosh"):
+                await say(
+                    message,
+                    "❌ Hech qolip kiritilmadi!\nAvval shablon tanlang.",
+                    reply_markup=await shablon_menu(user_id, {})
+                )
+                return
             await state.clear()
+            if payload.get("formula_yoq"):
+                await say(
+                    message,
+                    "❌ Qolip formulasi kiritilmagan!",
+                    reply_markup=await production_menu(user_id)
+                )
+                return
             text = "⛔ Ishlab chiqarish mumkin emas!\nMateriallar yetarli emas:\n\n"
-            text += "\n".join(yetishmaydi)
+            text += "\n".join(
+                f"❌ {x['nomi']}: kerak {x['kerak_asl']:.2f} {x['birlik']}, "
+                f"bor {x['bor_asl']:.2f} {x['birlik']}"
+                for x in payload["yetishmaydi"]
+            )
             await say(message, text, reply_markup=await production_menu(user_id))
             return
 
-        A_blok = s1 * 12 + s3 * 11
-        B_blok = s2 * 24 + s3 * 2
-        bugun = db.bugungi_sana()
-
-        # Bazaga yozish
-        prod_ids = []
-        if s1 > 0:
-            pid = await db.add_production_log(bugun, 1, s1, user_id)
-            prod_ids.append((pid, 1, s1))
-        if s2 > 0:
-            pid = await db.add_production_log(bugun, 2, s2, user_id)
-            prod_ids.append((pid, 2, s2))
-        if s3 > 0:
-            pid = await db.add_production_log(bugun, 3, s3, user_id)
-            prod_ids.append((pid, 3, s3))
-
-        # Xom ashyoni kamaytirish
-        formula = await db.get_qolip_formula()
-        ogohlantirish = []
-        sarflar = []
-        min_settings = await db.get_settings()
-        min_map = {s[3]: s[1] for s in min_settings}
-
-        for f in formula:
-            nomi = f[0]
-            miqdor_asosiy = f[6]
-            qoldiq_asosiy = f[3]
-            asl_birlik = f[7]
-            material_id = f[5]
-
-            ketgan_asosiy = miqdor_asosiy * jami_qolip
-            yangi_qoldiq = max(0.0, qoldiq_asosiy - ketgan_asosiy)
-            await db.update_material_qoldiq(material_id, yangi_qoldiq)
-
-            # Chiqim log (asosiy birlikda — asl_birlik turiga mos)
-            for pid, shablon, qolip_soni in prod_ids:
-                ketgan_bu_log = miqdor_asosiy * qolip_soni
-                await db.add_material_chiqim_log(
-                    pid, material_id, nomi,
-                    ketgan_bu_log, asl_birlik, bugun
-                )
-
-            ketgan_asl = db.asosiydan_birlikga(ketgan_asosiy, asl_birlik)
-            qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq, asl_birlik)
-            sarflar.append(
-                f"   {nomi}: -{ketgan_asl:.2f} {asl_birlik} "
-                f"(qoldi: {qoldiq_asl:.2f} {asl_birlik})"
-            )
-
-            min_ch = min_map.get(material_id)
-            if min_ch and yangi_qoldiq <= min_ch:
-                min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
-                ogohlantirish.append(
-                    f"⚠️ {nomi} kam qoldi!\n"
-                    f"   Qoldiq: {qoldiq_asl:.2f} {asl_birlik}\n"
-                    f"   Minimum: {min_asl:.2f} {asl_birlik}"
-                )
-
-        # Tayyor mahsulot omboriga qo'shish
-        if A_blok > 0:
-            await db.update_finished_goods("A", A_blok)
-        if B_blok > 0:
-            await db.update_finished_goods("B", B_blok)
-
-        # Audit log
-        user = await db.get_user(user_id)
-        await db.add_audit_log(
-            user_id,
-            user["ism"] if user else str(user_id),
-            user["rol"] if user else "-",
-            "Ishlab chiqarish kiritildi",
-            f"Qolip: {jami_qolip} ta | A: {A_blok} ta | B: {B_blok} ta"
-        )
-
         await state.clear()
 
-        sarflar_text = "\n".join(sarflar)
+        sarflar_text = "\n".join(
+            f"   {x['nomi']}: -{x['ketgan_asl']:.2f} {x['birlik']} "
+            f"(qoldi: {x['qoldiq_asl']:.2f} {x['birlik']})"
+            for x in payload["sarflar"]
+        )
         result = (
             f"✅ Ishlab chiqarish kiritildi!\n\n"
-            f"📦 Jami qolip: {jami_qolip} ta\n"
-            f"   Shablon 1: {s1} | Shablon 2: {s2} | Shablon 3: {s3}\n\n"
+            f"📦 Jami qolip: {payload['jami_qolip']} ta\n"
+            f"   Shablon 1: {payload['s1']} | Shablon 2: {payload['s2']} | "
+            f"Shablon 3: {payload['s3']}\n\n"
             f"🧱 Tayyor bloklar:\n"
-            f"   A blok: +{A_blok} ta\n"
-            f"   B blok: +{B_blok} ta\n\n"
+            f"   A blok: +{payload['A_blok']} ta\n"
+            f"   B blok: +{payload['B_blok']} ta\n\n"
             f"📉 Sarflangan:\n{sarflar_text}"
         )
         await say(message, result, reply_markup=await production_menu(user_id))
 
-        if ogohlantirish:
-            await say(message, "\n\n".join(ogohlantirish))
+        if payload["ogohlantirish"]:
+            ogoh_text = "\n\n".join(
+                f"⚠️ {x['nomi']} kam qoldi!\n"
+                f"   Qoldiq: {x['qoldiq_asl']:.2f} {x['birlik']}\n"
+                f"   Minimum: {x['min_asl']:.2f} {x['birlik']}"
+                for x in payload["ogohlantirish"]
+            )
+            await say(message, ogoh_text)
         return
 
     # Shablon tanlash
