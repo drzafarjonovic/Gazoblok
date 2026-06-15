@@ -1253,3 +1253,63 @@ async def ombor_xom_qiymati():
             "SELECT COALESCE(SUM(qoldiq * COALESCE(narx, 0)), 0) AS jami FROM materials"
         )
         return float(row["jami"]) if row else 0.0
+
+
+
+# ── Foydalanuvchi (ishchi) kesimida hisobot ──
+async def get_production_by_user_range(boshliq, oxiri):
+    """Davr bo'yicha har bir foydalanuvchining ishlab chiqarishi.
+    [{user_id, ism, rol, qolip, A, B}] (qolip soni bo'yicha kamayuvchi)."""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT p.user_id, u.ism AS ism, u.rol AS rol,
+                   p.shablon, COALESCE(SUM(p.qolip_soni), 0) AS qty
+            FROM production_log p
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.sana BETWEEN $1 AND $2
+            GROUP BY p.user_id, u.ism, u.rol, p.shablon
+        """, boshliq_str, oxiri_str)
+
+    agg = {}
+    for r in rows:
+        uid = r["user_id"]
+        d = agg.setdefault(uid, {
+            "user_id": uid,
+            "ism": r["ism"] or "Noma'lum",
+            "rol": r["rol"] or "-",
+            "qolip": 0, "A": 0, "B": 0,
+        })
+        a, b = shablon_bloklari(r["shablon"], r["qty"])
+        d["qolip"] += r["qty"]
+        d["A"] += a
+        d["B"] += b
+    return sorted(agg.values(), key=lambda x: x["qolip"], reverse=True)
+
+
+async def get_sales_by_user_range(boshliq, oxiri):
+    """Davr bo'yicha har bir foydalanuvchining sotuvi.
+    [{user_id, ism, rol, qty, rev}] (miqdor bo'yicha kamayuvchi). rev — UZS."""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT s.user_id, u.ism AS ism, u.rol AS rol,
+                   COALESCE(SUM(s.miqdor), 0) AS qty,
+                   COALESCE(SUM(s.miqdor * COALESCE(s.narx, 0)), 0) AS rev
+            FROM sales_log s
+            LEFT JOIN users u ON s.user_id = u.id
+            WHERE s.sana BETWEEN $1 AND $2
+            GROUP BY s.user_id, u.ism, u.rol
+            ORDER BY qty DESC
+        """, boshliq_str, oxiri_str)
+        return [{
+            "user_id": r["user_id"],
+            "ism": r["ism"] or "Noma'lum",
+            "rol": r["rol"] or "-",
+            "qty": int(r["qty"]),
+            "rev": float(r["rev"]),
+        } for r in rows]
