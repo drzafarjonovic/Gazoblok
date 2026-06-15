@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import logging
 import os
+import time
 from aiogram import Bot, Dispatcher, BaseMiddleware, Router
 from aiogram.types import (
     Message, TelegramObject, ErrorEvent,
@@ -33,6 +35,13 @@ if not os.getenv("DATABASE_URL"):
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+# ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
+_pin_holat = {}
+
+
+def pin_hash(pin: str) -> str:
+    return hashlib.sha256(pin.encode("utf-8")).hexdigest()
 
 
 # Til tanlash klaviaturasi (inline)
@@ -157,6 +166,29 @@ class PermissionMiddleware(BaseMiddleware):
         if not user["faol"]:
             await event.answer("⛔ Sizning hisobingiz bloklangan!")
             return
+
+        # ── PIN qulf tekshiruvi ──
+        saqlangan_hash = await db.get_bot_setting("pin_hash")
+        if saqlangan_hash:
+            timeout = int(await db.get_bot_setting("pin_timeout") or 5) * 60
+            hozir = time.time()
+            oxirgi = _pin_holat.get(event.from_user.id)
+            qulflangan = (oxirgi is None) or (hozir - oxirgi > timeout)
+            if qulflangan:
+                kiritilgan = (event.text or "").strip()
+                if kiritilgan and pin_hash(kiritilgan) == saqlangan_hash:
+                    _pin_holat[event.from_user.id] = hozir
+                    menu = await get_menu(event.from_user.id, user["rol"])
+                    await event.answer(
+                        await t("🔓 Qulf ochildi!", event.from_user.id),
+                        reply_markup=menu
+                    )
+                    return
+                await event.answer(await t(
+                    "🔒 Bot qulflangan. PIN kodni kiriting:", event.from_user.id))
+                return
+            # Faol — vaqtni yangilaymiz
+            _pin_holat[event.from_user.id] = hozir
 
         # Oxirgi faollik vaqtini yangilaymiz
         await db.touch_user(event.from_user.id)

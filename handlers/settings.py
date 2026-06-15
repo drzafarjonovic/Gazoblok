@@ -4,6 +4,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+import hashlib
 import database as db
 from translation import (
     Tkey, say, say_error, build_keyboard, t, invalidate_til_cache, prewarm, TIL_NOMLARI,
@@ -47,6 +48,14 @@ class ObunaState(StatesGroup):
     ochirish = State()
 
 
+class PinState(StatesGroup):
+    kod = State()
+
+
+class PinTimeoutState(StatesGroup):
+    qiymat = State()
+
+
 async def sozlamalar_menu(user_id):
     return await build_keyboard(user_id, [
         ["🌐 Tilni o'zgartirish"],
@@ -58,6 +67,7 @@ async def sozlamalar_menu(user_id):
         ["📋 Qolip formulasi"],
         ["⚠️ Minimum chegara"],
         ["🔔 Hisobot jadvali"],
+        ["🔒 PIN kod"],
         ["🗑️ Barcha ma'lumotlarni tozalash"],
         ["🏠 Asosiy menyu"],
     ])
@@ -748,6 +758,106 @@ async def id_ochirish_saqlash(message: Message, state: FSMContext):
                   reply_markup=await obuna_menu(message.from_user.id))
     except ValueError:
         await say(message, "❌ Faqat raqam kiriting!")
+
+
+# ── PIN kod (qulf) — faqat superadmin ──
+async def pin_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["🔑 PIN o'rnatish"],
+        ["⏱ Qulflanish vaqti"],
+        ["🔓 PIN o'chirish"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+async def _faqat_super(message: Message) -> bool:
+    user = await db.get_user(message.from_user.id)
+    if not user or user["rol"] != "superadmin":
+        await say(message, "❌ Bu amal faqat Super Admin uchun!")
+        return False
+    return True
+
+
+@router.message(Tkey("🔒 PIN kod"))
+async def pin_kod(message: Message):
+    if not await _faqat_super(message):
+        return
+    bor = await db.get_bot_setting("pin_hash")
+    timeout = await db.get_bot_setting("pin_timeout") or "5"
+    holat = (f"✅ Yoqilgan (qulflanish: {timeout} daqiqa nofaollik)"
+             if bor else "❌ O'chirilgan")
+    await say(
+        message,
+        f"🔒 PIN kod\nHolat: {holat}\n\n"
+        f"Nofaollikdan so'ng bot qulflanadi va PIN so'raydi.",
+        reply_markup=await pin_menu(message.from_user.id)
+    )
+
+
+@router.message(Tkey("🔑 PIN o'rnatish"))
+async def pin_ornatish(message: Message, state: FSMContext):
+    if not await _faqat_super(message):
+        return
+    await state.clear()
+    await state.set_state(PinState.kod)
+    await say(message, "Yangi PIN kodni kiriting (4–8 raqam):\nMisol: 1234")
+
+
+@router.message(PinState.kod)
+async def pin_saqlash(message: Message, state: FSMContext):
+    kod = message.text.strip()
+    if not (kod.isdigit() and 4 <= len(kod) <= 8):
+        await say(message, "❌ PIN 4–8 raqamdan iborat bo'lishi kerak! Misol: 1234")
+        return
+    pin_h = hashlib.sha256(kod.encode("utf-8")).hexdigest()
+    await db.set_bot_setting("pin_hash", pin_h)
+    if not await db.get_bot_setting("pin_timeout"):
+        await db.set_bot_setting("pin_timeout", "5")
+    await state.clear()
+    await _audit_pin(message, "PIN o'rnatildi/yangilandi")
+    await say(message, "✅ PIN kod o'rnatildi!",
+              reply_markup=await pin_menu(message.from_user.id))
+
+
+@router.message(Tkey("⏱ Qulflanish vaqti"))
+async def pin_timeout(message: Message, state: FSMContext):
+    if not await _faqat_super(message):
+        return
+    joriy = await db.get_bot_setting("pin_timeout") or "5"
+    await state.clear()
+    await state.set_state(PinTimeoutState.qiymat)
+    await say(message, f"Nofaollik vaqtini kiriting (daqiqa, 1–1440):\n"
+                       f"Hozirgi: {joriy} daqiqa")
+
+
+@router.message(PinTimeoutState.qiymat)
+async def pin_timeout_saqlash(message: Message, state: FSMContext):
+    try:
+        m = int(message.text.strip())
+        if not (1 <= m <= 1440):
+            raise ValueError
+        await db.set_bot_setting("pin_timeout", str(m))
+        await state.clear()
+        await say(message, f"✅ Qulflanish vaqti: {m} daqiqa",
+                  reply_markup=await pin_menu(message.from_user.id))
+    except ValueError:
+        await say(message, "❌ 1 dan 1440 gacha son kiriting!")
+
+
+@router.message(Tkey("🔓 PIN o'chirish"))
+async def pin_ochirish(message: Message):
+    if not await _faqat_super(message):
+        return
+    await db.set_bot_setting("pin_hash", "")
+    await _audit_pin(message, "PIN o'chirildi")
+    await say(message, "✅ PIN kod o'chirildi (qulf o'chiq).",
+              reply_markup=await pin_menu(message.from_user.id))
+
+
+async def _audit_pin(message, amal):
+    user = await db.get_user(message.from_user.id)
+    await db.add_audit_log(message.from_user.id, user["ism"] if user else "-",
+                           user["rol"] if user else "-", amal, "")
 
 
 # ── Barcha ma'lumotlarni tozalash ──
