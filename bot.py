@@ -158,6 +158,9 @@ class PermissionMiddleware(BaseMiddleware):
             await event.answer("⛔ Sizning hisobingiz bloklangan!")
             return
 
+        # Oxirgi faollik vaqtini yangilaymiz
+        await db.touch_user(event.from_user.id)
+
         # Tilni bir marta isitamiz (cold-start sekinligini oldini olish)
         til = user.get("til") or "uz"
         await ensure_warm(til)
@@ -219,30 +222,38 @@ async def start(message: Message):
     # 2. Mavjud user
     user = await db.get_user(user_id)
 
-    # 3. Yangi user (admin tomonidan qo'shilmagan)
+    # 3. Yangi user → pending so'rov + adminga inline tasdiqlash
     if not user:
+        await db.add_pending(user_id, ism, username)
         admin_id = await db.get_bot_setting("admin_chat_id")
         if admin_id:
             try:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"appr:{user_id}"),
+                    InlineKeyboardButton(text="❌ Rad etish", callback_data=f"rej:{user_id}"),
+                ]])
                 await bot.send_message(
                     int(admin_id),
-                    f"🔔 Yangi foydalanuvchi kirmoqchi:\n"
+                    f"🔔 Yangi ro'yxatdan o'tish so'rovi:\n"
                     f"👤 Ism: {esc(ism)}\n"
                     f"🆔 ID: <code>{user_id}</code>\n"
-                    f"@{esc(username) if username else 'username yoq'}\n\n"
-                    f"👥 Foydalanuvchilar → ➕ Foydalanuvchi qo'shish",
-                    parse_mode="HTML"
+                    f"@{esc(username) if username else 'username yoq'}",
+                    parse_mode="HTML", reply_markup=kb
                 )
             except Exception:
                 pass
         await message.answer(
-            f"⛔ Salom, {ism}!\n\n"
-            f"Siz hali ro'yxatdan o'tmagansiz.\n"
-            f"Admin sizni tizimga qo'shishini kuting.\n\n"
+            f"✅ Salom, {ism}!\n\n"
+            f"So'rovingiz adminga yuborildi.\n"
+            f"Tasdiqlanishini kuting — tayyor bo'lganda xabar beramiz.\n\n"
             f"Sizning ID: <code>{user_id}</code>",
             parse_mode="HTML"
         )
         return
+
+    # Username avtomatik yangilash (admin qo'ygan ismga tegmaymiz)
+    if username and user.get("username") != username:
+        await db.update_user_username(user_id, username)
 
     # 4. Bloklangan user
     if not user["faol"]:

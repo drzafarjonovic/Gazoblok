@@ -354,6 +354,19 @@ async def init_db():
                 vaqt TIMESTAMP DEFAULT NOW()
             )
         """)
+        # Ro'yxatdan o'tish so'rovlari (pending)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS pending_users (
+                user_id BIGINT PRIMARY KEY,
+                ism TEXT,
+                username TEXT,
+                vaqt TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        # Oxirgi faollik vaqti
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS oxirgi_faollik TIMESTAMP"
+        )
 
 # ── Permissions ──
 async def get_user_permissions(user_id, rol):
@@ -1399,3 +1412,103 @@ async def get_material_sarfi(boshliq, oxiri):
             "jami": float(r["jami"]),
             "narx": float(r["narx"] or 0),
         } for r in rows]
+
+
+
+# ── Foydalanuvchi lifecycle (pending, bloklash, faollik) ──
+async def add_pending(user_id, ism, username):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO pending_users (user_id, ism, username, vaqt)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (user_id) DO UPDATE SET ism=$2, username=$3, vaqt=NOW()
+        """, user_id, ism, username)
+
+
+async def get_pending():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id, ism, username FROM pending_users ORDER BY vaqt DESC"
+        )
+        return [dict(r) for r in rows]
+
+
+async def get_pending_one(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT user_id, ism, username FROM pending_users WHERE user_id=$1", user_id
+        )
+        return dict(row) if row else None
+
+
+async def remove_pending(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM pending_users WHERE user_id=$1", user_id)
+
+
+async def unblock_user(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET faol=TRUE WHERE id=$1", user_id)
+
+
+async def get_blocked_users():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM users WHERE faol=FALSE ORDER BY qoshilgan_vaqt DESC"
+        )
+        return [dict(r) for r in rows]
+
+
+async def update_user_ism(user_id, ism):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET ism=$1 WHERE id=$2", ism, user_id)
+
+
+async def update_user_username(user_id, username):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET username=$1 WHERE id=$2", username, user_id
+        )
+
+
+async def touch_user(user_id):
+    """Oxirgi faollik vaqtini yangilash (faol userlar uchun)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET oxirgi_faollik=NOW() WHERE id=$1 AND faol=TRUE", user_id
+        )
+
+
+async def get_user_stats(user_id):
+    """Foydalanuvchining umumiy ishlab chiqarish/sotuv statistikasi."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        prow = await conn.fetch(
+            "SELECT shablon, COALESCE(SUM(qolip_soni),0) AS qty "
+            "FROM production_log WHERE user_id=$1 GROUP BY shablon", user_id
+        )
+        srow = await conn.fetchrow(
+            "SELECT COALESCE(SUM(miqdor),0) AS qty, "
+            "COALESCE(SUM(miqdor*COALESCE(narx,0)),0) AS rev "
+            "FROM sales_log WHERE user_id=$1", user_id
+        )
+    qolip = A = B = 0
+    for r in prow:
+        a, b = shablon_bloklari(r["shablon"], r["qty"])
+        qolip += r["qty"]
+        A += a
+        B += b
+    return {
+        "qolip": qolip, "A": A, "B": B,
+        "sotuv_qty": int(srow["qty"]) if srow else 0,
+        "sotuv_rev": float(srow["rev"]) if srow else 0.0,
+    }
