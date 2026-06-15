@@ -82,7 +82,7 @@ ROLLAR = {
     "hisobchi": "Hisobchi",
 }
 
-# 10 ta permission
+# Huquqlar (operatsion + administrativ)
 BARCHA_PERMISSIONLAR = [
     "ishlab_chiqarish_kiritish",
     "ishlab_chiqarish_korish",
@@ -92,73 +92,47 @@ BARCHA_PERMISSIONLAR = [
     "ombor_korish",
     "tayyor_mahsulot_korish",
     "tayyor_mahsulot_tahrirlash",
+    "inventarizatsiya",
     "hisobot_korish",
+    "moliya_korish",
     "excel_hisobot",
+    "sozlama_boshqaruv",
+    "foydalanuvchi_boshqaruv",
 ]
+
+# Administrativ huquqlar (faqat superadmin tomonidan berilishi mumkin)
+ADMIN_PERMISSIONLAR = {"sozlama_boshqaruv", "foydalanuvchi_boshqaruv"}
+
+
+def _rol(*true_perms):
+    d = {p: False for p in BARCHA_PERMISSIONLAR}
+    for p in true_perms:
+        d[p] = True
+    return d
+
 
 # Standart rol huquqlari
 STANDART_ROL_PERMISSIONLAR = {
     "superadmin": {p: True for p in BARCHA_PERMISSIONLAR},
-    "direktor": {
-        "ishlab_chiqarish_kiritish": False,
-        "ishlab_chiqarish_korish": True,
-        "sotuv_kiritish": False,
-        "sotuv_korish": True,
-        "ombor_kiritish": False,
-        "ombor_korish": True,
-        "tayyor_mahsulot_korish": True,
-        "tayyor_mahsulot_tahrirlash": False,
-        "hisobot_korish": True,
-        "excel_hisobot": True,
-    },
-    "omborchi": {
-        "ishlab_chiqarish_kiritish": False,
-        "ishlab_chiqarish_korish": True,
-        "sotuv_kiritish": False,
-        "sotuv_korish": False,
-        "ombor_kiritish": True,
-        "ombor_korish": True,
-        "tayyor_mahsulot_korish": True,
-        "tayyor_mahsulot_tahrirlash": True,
-        "hisobot_korish": True,
-        "excel_hisobot": False,
-    },
-    "ishchi": {
-        "ishlab_chiqarish_kiritish": True,
-        "ishlab_chiqarish_korish": True,
-        "sotuv_kiritish": False,
-        "sotuv_korish": False,
-        "ombor_kiritish": False,
-        "ombor_korish": True,
-        "tayyor_mahsulot_korish": False,
-        "tayyor_mahsulot_tahrirlash": False,
-        "hisobot_korish": False,
-        "excel_hisobot": False,
-    },
-    "sotuvchi": {
-        "ishlab_chiqarish_kiritish": False,
-        "ishlab_chiqarish_korish": False,
-        "sotuv_kiritish": True,
-        "sotuv_korish": True,
-        "ombor_kiritish": False,
-        "ombor_korish": False,
-        "tayyor_mahsulot_korish": True,
-        "tayyor_mahsulot_tahrirlash": False,
-        "hisobot_korish": False,
-        "excel_hisobot": False,
-    },
-    "hisobchi": {
-        "ishlab_chiqarish_kiritish": False,
-        "ishlab_chiqarish_korish": True,
-        "sotuv_kiritish": False,
-        "sotuv_korish": True,
-        "ombor_kiritish": False,
-        "ombor_korish": True,
-        "tayyor_mahsulot_korish": True,
-        "tayyor_mahsulot_tahrirlash": False,
-        "hisobot_korish": True,
-        "excel_hisobot": True,
-    },
+    "direktor": _rol(
+        "ishlab_chiqarish_korish", "sotuv_korish", "ombor_korish",
+        "tayyor_mahsulot_korish", "hisobot_korish", "moliya_korish", "excel_hisobot",
+    ),
+    "omborchi": _rol(
+        "ishlab_chiqarish_korish", "ombor_kiritish", "ombor_korish",
+        "tayyor_mahsulot_korish", "tayyor_mahsulot_tahrirlash",
+        "inventarizatsiya", "hisobot_korish",
+    ),
+    "ishchi": _rol(
+        "ishlab_chiqarish_kiritish", "ishlab_chiqarish_korish", "ombor_korish",
+    ),
+    "sotuvchi": _rol(
+        "sotuv_kiritish", "sotuv_korish", "tayyor_mahsulot_korish",
+    ),
+    "hisobchi": _rol(
+        "ishlab_chiqarish_korish", "sotuv_korish", "ombor_korish",
+        "tayyor_mahsulot_korish", "hisobot_korish", "moliya_korish", "excel_hisobot",
+    ),
 }
 
 # ── Connection Pool ──

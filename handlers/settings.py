@@ -64,12 +64,15 @@ async def sozlamalar_menu(user_id):
 
 
 async def _faqat_superadmin(message: Message) -> bool:
-    """Sozlamalar bo'limi faqat superadmin uchun."""
+    """Sozlamalar — 'sozlama_boshqaruv' huquqi (superadmin doim ega)."""
     user = await db.get_user(message.from_user.id)
-    if not user or user["rol"] != "superadmin":
-        await say(message, "❌ Ruxsat yo'q! Bu bo'lim faqat Super Admin uchun.")
+    if not user or not user["faol"]:
+        await say(message, "❌ Ruxsat yo'q!")
         return False
-    return True
+    if await db.has_permission(message.from_user.id, user["rol"], "sozlama_boshqaruv"):
+        return True
+    await say(message, "❌ Sizda sozlamalarni boshqarish huquqi yo'q!")
+    return False
 
 
 @router.message(Tkey("⚙️ Sozlamalar"))

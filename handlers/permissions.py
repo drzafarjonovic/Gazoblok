@@ -1,5 +1,7 @@
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
@@ -16,8 +18,12 @@ PERMISSION_NOMI = {
     "ombor_korish": "👁 Ombor ko'rish",
     "tayyor_mahsulot_korish": "👁 Tayyor mahsulot ko'rish",
     "tayyor_mahsulot_tahrirlash": "✏️ Tayyor mahsulot tahrirlash",
+    "inventarizatsiya": "📋 Inventarizatsiya",
     "hisobot_korish": "📊 Hisobot ko'rish",
-    "excel_hisobot": "📥 Excel hisobot",
+    "moliya_korish": "💵 Moliya / ishbay haq",
+    "excel_hisobot": "📥 Eksport (Excel/CSV/PDF)",
+    "sozlama_boshqaruv": "⚙️ Sozlamalar boshqaruvi",
+    "foydalanuvchi_boshqaruv": "👥 Foydalanuvchi boshqaruvi",
 }
 
 ROLLAR_NOMI = {
@@ -36,26 +42,19 @@ ROL_MAP = {
     "📊 Hisobchi": "hisobchi",
 }
 
-RUXSAT_BUTTONS = {"✅ Ruxsat berish": True, "❌ Ruxsatni olish": False}
-
 
 class RolPermState(StatesGroup):
     rol = State()
-    permission = State()
-    ruxsat = State()
 
 
 class UserPermState(StatesGroup):
     user_id = State()
-    permission = State()
-    ruxsat = State()
 
 
 async def permissions_menu(user_id):
     return await build_keyboard(user_id, [
         ["🔐 Rol huquqlari"],
         ["👤 Foydalanuvchi huquqlari"],
-        ["📋 Huquqlar ro'yxati"],
         ["🏠 Asosiy menyu"],
     ])
 
@@ -71,37 +70,73 @@ async def rol_menu(user_id):
     ])
 
 
-async def ruxsat_menu(user_id):
-    return await build_keyboard(user_id, [
-        ["✅ Ruxsat berish"],
-        ["❌ Ruxsatni olish"],
-        ["🏠 Asosiy menyu"],
-    ])
-
-
-async def _faqat_superadmin(message: Message) -> bool:
+async def _ruxsat(message: Message) -> bool:
     user = await db.get_user(message.from_user.id)
-    if not user or user["rol"] != "superadmin":
+    if not user or not user["faol"]:
         await say(message, "❌ Ruxsat yo'q!")
         return False
-    return True
+    if await db.has_permission(message.from_user.id, user["rol"], "foydalanuvchi_boshqaruv"):
+        return True
+    await say(message, "❌ Sizda huquqlarni boshqarish huquqi yo'q!")
+    return False
 
 
+def _qatorlar(effektiv, is_super, callback_prefix, indiv=None):
+    """Huquqlar uchun inline tugmalar (✅/❌ toggle)."""
+    kb = []
+    for p, nomi in PERMISSION_NOMI.items():
+        if p in db.ADMIN_PERMISSIONLAR and not is_super:
+            continue
+        belgi = "✅" if effektiv.get(p) else "❌"
+        qoshimcha = " •" if (indiv is not None and p in indiv) else ""
+        kb.append([InlineKeyboardButton(
+            text=f"{belgi} {nomi}{qoshimcha}",
+            callback_data=f"{callback_prefix}:{p}"
+        )])
+    return kb
+
+
+async def rol_perm_keyboard(is_super, rol):
+    perms = await db.get_rol_permissions(rol)
+    kb = _qatorlar(perms, is_super, f"prm:r:{rol}")
+    kb.append([
+        InlineKeyboardButton(text="✅ Hammasi", callback_data=f"prm:r:{rol}:__all"),
+        InlineKeyboardButton(text="❌ Hech biri", callback_data=f"prm:r:{rol}:__none"),
+    ])
+    kb.append([InlineKeyboardButton(text="🔙 Yopish", callback_data="prm:close")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def user_perm_keyboard(is_super, uid):
+    target = await db.get_user(uid)
+    rol = target["rol"] if target else "ishchi"
+    eff = await db.get_user_permissions(uid, rol)
+    indiv = await db.get_user_individual_permissions(uid)
+    kb = _qatorlar(eff, is_super, f"prm:u:{uid}", indiv=indiv)
+    kb.append([InlineKeyboardButton(text="♻️ Rolga qaytarish",
+                                    callback_data=f"prm:u:{uid}:__reset")])
+    kb.append([InlineKeyboardButton(text="🔙 Yopish", callback_data="prm:close")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ── Kirish ──
 @router.message(Tkey("🔐 Huquqlar boshqaruvi"))
 async def huquqlar(message: Message):
-    if not await _faqat_superadmin(message):
+    if not await _ruxsat(message):
         return
-    await say(message, "🔐 Huquqlar boshqaruvi:", reply_markup=await permissions_menu(message.from_user.id))
+    await say(message, "🔐 Huquqlar boshqaruvi:",
+              reply_markup=await permissions_menu(message.from_user.id))
 
 
 # ── Rol huquqlari ──
 @router.message(Tkey("🔐 Rol huquqlari"))
 async def rol_huquqlari(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
+    if not await _ruxsat(message):
         return
     await state.clear()
     await state.set_state(RolPermState.rol)
-    await say(message, "Qaysi rol uchun huquqlarni o'zgartirish?", reply_markup=await rol_menu(message.from_user.id))
+    await say(message, "Qaysi rol uchun huquqlar?",
+              reply_markup=await rol_menu(message.from_user.id))
 
 
 @router.message(RolPermState.rol)
@@ -111,87 +146,29 @@ async def rol_tanlash(message: Message, state: FSMContext):
         await say(message, "❌ Tugmalardan birini tanlang!")
         return
     rol = ROL_MAP[uz]
-    await state.update_data(rol=rol)
-
-    # Hozirgi huquqlarni ko'rsatish
-    perms = await db.get_rol_permissions(rol)
-    text = f"📋 {ROLLAR_NOMI[rol]} uchun hozirgi huquqlar:\n\n"
-    for p, nomi in PERMISSION_NOMI.items():
-        status = "✅" if perms.get(p, False) else "❌"
-        text += f"{status} {nomi}\n"
-
-    text += "\nQaysi huquqni o'zgartirish?\nRaqamini kiriting:\n\n"
-    for i, (p, nomi) in enumerate(PERMISSION_NOMI.items(), 1):
-        text += f"{i}. {nomi}\n"
-
-    await state.update_data(permissions_list=list(PERMISSION_NOMI.keys()))
-    await state.set_state(RolPermState.permission)
-    await say(message, text)
-
-
-@router.message(RolPermState.permission)
-async def permission_tanlash(message: Message, state: FSMContext):
-    try:
-        idx = int(message.text.strip()) - 1
-        data = await state.get_data()
-        perms_list = data["permissions_list"]
-        if idx < 0 or idx >= len(perms_list):
-            raise ValueError
-        perm = perms_list[idx]
-        await state.update_data(permission=perm)
-        await state.set_state(RolPermState.ruxsat)
-        await say(
-            message,
-            f"📌 {PERMISSION_NOMI[perm]}\n\n"
-            f"Ruxsat bering yoki oling:",
-            reply_markup=await ruxsat_menu(message.from_user.id)
-        )
-    except ValueError:
-        await say(message, "❌ To'g'ri raqam kiriting!")
-
-
-@router.message(RolPermState.ruxsat)
-async def rol_ruxsat_berish(message: Message, state: FSMContext):
-    uz = await canon(message, list(RUXSAT_BUTTONS.keys()))
-    if uz is None:
-        await say(message, "❌ Tugmalardan birini tanlang!")
-        return
-    ruxsat = RUXSAT_BUTTONS[uz]
-    data = await state.get_data()
-    rol = data["rol"]
-    permission = data["permission"]
-
-    await db.set_rol_permission(rol, permission, ruxsat)
-
-    admin = await db.get_user(message.from_user.id)
-    await db.add_audit_log(
-        message.from_user.id,
-        admin["ism"] if admin else str(message.from_user.id),
-        "superadmin",
-        "Rol huquqi o'zgartirildi",
-        f"{rol} → {permission}: {'ruxsat' if ruxsat else 'taqiqlandi'}"
-    )
     await state.clear()
-    status = "✅ Ruxsat berildi" if ruxsat else "❌ Ruxsat olindi"
+    user = await db.get_user(message.from_user.id)
+    is_super = bool(user and user["rol"] == "superadmin")
+    kb = await rol_perm_keyboard(is_super, rol)
     await say(
         message,
-        f"{status}!\n"
-        f"Rol: {ROLLAR_NOMI.get(rol, rol)}\n"
-        f"Huquq: {PERMISSION_NOMI[permission]}",
-        reply_markup=await permissions_menu(message.from_user.id)
+        f"📋 {ROLLAR_NOMI.get(rol, rol)} huquqlari:\n"
+        f"Tugmani bosib bering/oling.",
+        reply_markup=kb
     )
 
 
 # ── Foydalanuvchi individual huquqlari ──
 @router.message(Tkey("👤 Foydalanuvchi huquqlari"))
 async def user_huquqlari(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
+    if not await _ruxsat(message):
         return
     await state.clear()
     users = await db.get_all_users()
     faol_users = [u for u in users if u["faol"] and u["rol"] != "superadmin"]
     if not faol_users:
-        await say(message, "❌ Foydalanuvchi yo'q!", reply_markup=await permissions_menu(message.from_user.id))
+        await say(message, "❌ Foydalanuvchi yo'q!",
+                  reply_markup=await permissions_menu(message.from_user.id))
         return
     text = "👤 Qaysi foydalanuvchi?\nID raqamini kiriting:\n\n"
     for u in faol_users:
@@ -203,110 +180,104 @@ async def user_huquqlari(message: Message, state: FSMContext):
 @router.message(UserPermState.user_id)
 async def user_id_tanlash(message: Message, state: FSMContext):
     try:
-        user_id = int(message.text.strip())
-        target = await db.get_user(user_id)
-        if not target:
-            await say(message, "❌ Foydalanuvchi topilmadi!")
-            await state.clear()
-            return
-
-        # Hozirgi huquqlarni ko'rsatish
-        perms = await db.get_user_permissions(user_id, target["rol"])
-        indiv = await db.get_user_individual_permissions(user_id)
-
-        text = f"👤 {target['ism']} ({target['rol']})\n\n"
-        text += "📋 Hozirgi huquqlar (rol + individual):\n"
-        for p, nomi in PERMISSION_NOMI.items():
-            status = "✅" if perms.get(p, False) else "❌"
-            ind = " (individual)" if p in indiv else ""
-            text += f"{status} {nomi}{ind}\n"
-
-        text += "\nQaysi huquqni o'zgartirish?\nRaqamini kiriting:\n\n"
-        for i, (p, nomi) in enumerate(PERMISSION_NOMI.items(), 1):
-            text += f"{i}. {nomi}\n"
-
-        await state.update_data(
-            user_id=user_id,
-            user_ism=target["ism"],
-            permissions_list=list(PERMISSION_NOMI.keys())
-        )
-        await state.set_state(UserPermState.permission)
-        await say(message, text)
+        uid = int(message.text.strip())
     except ValueError:
         await say(message, "❌ Faqat raqam kiriting!")
         await state.clear()
-
-
-@router.message(UserPermState.permission)
-async def user_permission_tanlash(message: Message, state: FSMContext):
-    try:
-        idx = int(message.text.strip()) - 1
-        data = await state.get_data()
-        perms_list = data["permissions_list"]
-        if idx < 0 or idx >= len(perms_list):
-            raise ValueError
-        perm = perms_list[idx]
-        await state.update_data(permission=perm)
-        await state.set_state(UserPermState.ruxsat)
-        await say(
-            message,
-            f"👤 {data['user_ism']}\n"
-            f"📌 {PERMISSION_NOMI[perm]}\n\n"
-            f"Ruxsat bering yoki oling:",
-            reply_markup=await ruxsat_menu(message.from_user.id)
-        )
-    except ValueError:
-        await say(message, "❌ To'g'ri raqam kiriting!")
-
-
-@router.message(UserPermState.ruxsat)
-async def user_ruxsat_berish(message: Message, state: FSMContext):
-    uz = await canon(message, list(RUXSAT_BUTTONS.keys()))
-    if uz is None:
-        await say(message, "❌ Tugmalardan birini tanlang!")
         return
-    ruxsat = RUXSAT_BUTTONS[uz]
-    data = await state.get_data()
-    user_id = data["user_id"]
-    permission = data["permission"]
-
-    await db.set_user_permission(user_id, permission, ruxsat)
-
-    admin = await db.get_user(message.from_user.id)
-    await db.add_audit_log(
-        message.from_user.id,
-        admin["ism"] if admin else str(message.from_user.id),
-        "superadmin",
-        "Foydalanuvchi huquqi o'zgartirildi",
-        f"{data['user_ism']} (ID:{user_id}) → {permission}: {'ruxsat' if ruxsat else 'taqiqlandi'}"
-    )
+    target = await db.get_user(uid)
     await state.clear()
-    status = "✅ Ruxsat berildi" if ruxsat else "❌ Ruxsat olindi"
+    if not target:
+        await say(message, "❌ Foydalanuvchi topilmadi!")
+        return
+    if target["rol"] == "superadmin":
+        await say(message, "❌ Super Admin huquqlari o'zgartirilmaydi!")
+        return
+    user = await db.get_user(message.from_user.id)
+    is_super = bool(user and user["rol"] == "superadmin")
+    kb = await user_perm_keyboard(is_super, uid)
     await say(
         message,
-        f"{status}!\n"
-        f"👤 {data['user_ism']}\n"
-        f"📌 {PERMISSION_NOMI[permission]}",
-        reply_markup=await permissions_menu(message.from_user.id)
+        f"👤 {esc(target['ism'])} ({target['rol']}) huquqlari:\n"
+        f"Tugmani bosib o'zgartiring. (• = individual)",
+        parse_mode="HTML",
+        reply_markup=kb
     )
 
 
-# ── Huquqlar ro'yxati ──
-@router.message(Tkey("📋 Huquqlar ro'yxati"))
-async def huquqlar_royxati(message: Message):
-    if not await _faqat_superadmin(message):
+# ── Toggle callback ──
+@router.callback_query(lambda c: c.data and c.data.startswith("prm:"))
+async def prm_callback(callback: CallbackQuery):
+    user = await db.get_user(callback.from_user.id)
+    if not user or not await db.has_permission(
+            callback.from_user.id, user["rol"], "foydalanuvchi_boshqaruv"):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
         return
+
+    parts = callback.data.split(":")
+    if parts[1] == "close":
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await callback.answer("Yopildi")
+        return
+
+    typ = parts[1]          # r | u
+    target = parts[2]       # rol nomi yoki user_id
+    perm = parts[3]         # permission yoki __all/__none/__reset
+    is_super = user["rol"] == "superadmin"
+
+    # Administrativ huquqlarni faqat superadmin o'zgartiradi
+    if perm in db.ADMIN_PERMISSIONLAR and not is_super:
+        await callback.answer("⛔ Faqat superadmin", show_alert=True)
+        return
+
     try:
-        text = "📋 Barcha rollar huquqlari:\n\n"
-        for rol in ["direktor", "omborchi", "ishchi", "sotuvchi", "hisobchi"]:
-            perms = await db.get_rol_permissions(rol)
-            text += f"── {ROLLAR_NOMI.get(rol, rol)} ──\n"
-            for p, nomi in PERMISSION_NOMI.items():
-                status = "✅" if perms.get(p, False) else "❌"
-                text += f"  {status} {nomi}\n"
-            text += "\n"
-        if len(text) > 4000:
-            text = text[:4000] + "\n..."
-        await say(message, text, reply_markup=await permissions_menu(message.from_user.id))
+        if typ == "r":
+            rol = target
+            cur = await db.get_rol_permissions(rol)
+            if perm == "__all":
+                for p in db.BARCHA_PERMISSIONLAR:
+                    if p in db.ADMIN_PERMISSIONLAR and not is_super:
+                        continue
+                    await db.set_rol_permission(rol, p, True)
+                tafsilot = f"{rol}: barchasi yoqildi"
+            elif perm == "__none":
+                for p in db.BARCHA_PERMISSIONLAR:
+                    if p in db.ADMIN_PERMISSIONLAR and not is_super:
+                        continue
+                    await db.set_rol_permission(rol, p, False)
+                tafsilot = f"{rol}: barchasi o'chirildi"
+            else:
+                yangi = not cur.get(perm, False)
+                await db.set_rol_permission(rol, perm, yangi)
+                tafsilot = f"{rol} → {perm}: {'✅' if yangi else '❌'}"
+            kb = await rol_perm_keyboard(is_super, rol)
+        else:  # u
+            uid = int(target)
+            tgt = await db.get_user(uid)
+            if tgt and tgt["rol"] == "superadmin":
+                await callback.answer("⛔ Superadmin", show_alert=True)
+                return
+            if perm == "__reset":
+                await db.clear_user_permissions(uid)
+                tafsilot = f"user {uid}: individual huquqlar tozalandi"
+            else:
+                rol = tgt["rol"] if tgt else "ishchi"
+                eff = await db.get_user_permissions(uid, rol)
+                yangi = not eff.get(perm, False)
+                await db.set_user_permission(uid, perm, yangi)
+                tafsilot = f"user {uid} → {perm}: {'✅' if yangi else '❌'}"
+            kb = await user_perm_keyboard(is_super, uid)
+
+        await callback.message.edit_reply_markup(reply_markup=kb)
+        await callback.answer("✔️")
+        await db.add_audit_log(
+            callback.from_user.id, user["ism"], user["rol"],
+            "Huquq o'zgartirildi", tafsilot
+        )
     except Exception as e:
-        await say_error(message, e)
+        from translation import log_exc
+        log_exc("prm_callback", e)
+        await callback.answer("❌ Xatolik", show_alert=True)

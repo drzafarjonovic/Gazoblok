@@ -69,7 +69,8 @@ async def tayyor_qoldiq(message: Message):
 async def dastlabki_qoldiq(message: Message, state: FSMContext):
     try:
         user = await db.get_user(message.from_user.id)
-        if not user or user["rol"] not in ["superadmin", "omborchi"]:
+        if not user or not await db.has_permission(
+                message.from_user.id, user["rol"], "tayyor_mahsulot_tahrirlash"):
             await say(
                 message,
                 "❌ Sizda bu amalni bajarish huquqi yo'q!",

@@ -75,10 +75,14 @@ async def get_menu(user_id, rol):
         tugmalar.add("🏪 Ombor")
     if perms.get("tayyor_mahsulot_korish") or perms.get("tayyor_mahsulot_tahrirlash"):
         tugmalar.add("🏬 Tayyor mahsulot")
-    if perms.get("hisobot_korish") or perms.get("excel_hisobot"):
+    if perms.get("hisobot_korish") or perms.get("moliya_korish") or perms.get("excel_hisobot"):
         tugmalar.add("📊 Hisobot")
-    if perms.get("tayyor_mahsulot_tahrirlash"):
+    if perms.get("inventarizatsiya"):
         tugmalar.add("📋 Inventarizatsiya")
+    if perms.get("sozlama_boshqaruv"):
+        tugmalar.add("⚙️ Sozlamalar")
+    if perms.get("foydalanuvchi_boshqaruv"):
+        tugmalar.add("👥 Foydalanuvchilar")
 
     rows = [[tugma] for tugma in sorted(tugmalar)]
     if not rows:
@@ -102,15 +106,20 @@ class PermissionMiddleware(BaseMiddleware):
         "✏️ Dastlabki qoldiqni kiritish": "tayyor_mahsulot_tahrirlash",
         "📊 Umumiy hisobot": "hisobot_korish",
         "📊 Tafsilotli hisobot": "hisobot_korish",
-        "👷 Ishchilar hisoboti": "hisobot_korish",
+        "👷 Ishchilar hisoboti": "moliya_korish",
         "🧱 Material sarfi": "hisobot_korish",
-        "💰 Moliya hisoboti": "hisobot_korish",
+        "💰 Moliya hisoboti": "moliya_korish",
         "📈 Taqqoslash": "hisobot_korish",
         "📉 Grafiklar": "hisobot_korish",
         "📥 Excel hisobot": "excel_hisobot",
         "📄 CSV eksport": "excel_hisobot",
         "📄 PDF eksport": "excel_hisobot",
-        "📋 Inventarizatsiya": "tayyor_mahsulot_tahrirlash",
+        "📋 Inventarizatsiya": "inventarizatsiya",
+        "📊 Inventarizatsiya kiritish": "inventarizatsiya",
+        "📋 Inventarizatsiya tarixi": "inventarizatsiya",
+        "⚙️ Sozlamalar": "sozlama_boshqaruv",
+        "👥 Foydalanuvchilar": "foydalanuvchi_boshqaruv",
+        "🔐 Huquqlar boshqaruvi": "foydalanuvchi_boshqaruv",
     }
 
     async def _kanonik_tugma(self, text: str, til: str):

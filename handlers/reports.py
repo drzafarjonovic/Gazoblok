@@ -670,7 +670,9 @@ async def _ruxsat(user_id, rtype):
         return False
     if user["rol"] == "superadmin":
         return True
-    perm = "excel_hisobot" if rtype in ("excel", "csv", "pdf") else "hisobot_korish"
+    perm = "excel_hisobot" if rtype in ("excel", "csv", "pdf") else (
+        "moliya_korish" if rtype in ("moliya", "ishchi") else "hisobot_korish"
+    )
     return await db.has_permission(user_id, user["rol"], perm)
 
 
