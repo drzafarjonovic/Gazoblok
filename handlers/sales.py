@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, eq, canon, say, build_keyboard
+from translation import Tkey, eq, canon, say, say_error, build_keyboard
 
 router = Router()
 
@@ -56,7 +56,7 @@ async def sotuv_kiritish(message: Message, state: FSMContext):
         await state.set_state(SalesState.block_type)
         await say(message, text, reply_markup=await block_type_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await sales_menu(message.from_user.id))
+        await say_error(message, e, reply_markup=await sales_menu(message.from_user.id))
 
 
 @router.message(SalesState.block_type)
@@ -128,9 +128,8 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
         await say(message, "❌ Faqat musbat son kiriting! Misol: 100")
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sales_menu(message.from_user.id)
         )
 
@@ -162,9 +161,8 @@ async def oxirgi_sotuv_ochirish(message: Message):
                 reply_markup=await sales_menu(message.from_user.id)
             )
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sales_menu(message.from_user.id)
         )
 
@@ -202,8 +200,7 @@ async def bugungi_sotuv(message: Message):
         )
         await say(message, text, reply_markup=await sales_menu(message.from_user.id))
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sales_menu(message.from_user.id)
         )

@@ -3,6 +3,8 @@ Gazoblok Bot - Multilingual Translation Module
 Deep Translator + Supabase Cache + In-memory cache + i18n helpers
 """
 import asyncio
+import html
+import logging
 import time
 from typing import Optional, List, Sequence
 
@@ -13,6 +15,11 @@ from aiogram.types import (
     KeyboardButton,
 )
 from deep_translator import GoogleTranslator
+
+logger = logging.getLogger("gazobot")
+
+# Foydalanuvchiga ko'rsatiladigan umumiy xato xabari (ichki tafsilotsiz)
+GENERIC_ERROR = "❌ Xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring."
 
 # Qo'llab-quvvatlanadigan tillar
 TILLAR = ["uz", "en", "ru", "ar", "tr", "zh-CN", "de"]
@@ -182,7 +189,7 @@ async def tarjima_qil(matn: str, til: str) -> str:
 
     except Exception as e:
         # Xatolikda original matnni qaytarish (fallback)
-        print(f"Tarjima xatoligi ({til}): {e}")
+        logger.warning("Tarjima xatoligi (%s): %r", til, e)
         return matn
 
 
@@ -336,3 +343,26 @@ async def say(message: Message, text: str, **kwargs):
     user_id = message.from_user.id if message.from_user else 0
     tarjima = await t(text, user_id)
     return await message.answer(tarjima, **kwargs)
+
+
+def esc(s) -> str:
+    """Foydalanuvchi kiritgan matnni HTML uchun xavfsiz qilish (injection oldini olish)."""
+    if s is None:
+        return ""
+    return html.escape(str(s))
+
+
+def log_exc(context: str, e: BaseException) -> None:
+    """Xatoni server tomonda log qiladi (foydalanuvchiga ko'rsatilmaydi)."""
+    logger.error("%s: %r", context, e, exc_info=e)
+
+
+async def say_error(message: Message, e: BaseException = None,
+                    context: str = "handler", **kwargs):
+    """
+    Xatoni log qilib, foydalanuvchiga umumiy (ichki tafsilotsiz) xabar yuboradi.
+    `str(e)` ni foydalanuvchiga oshkor qilmaydi.
+    """
+    if e is not None:
+        log_exc(context, e)
+    return await say(message, GENERIC_ERROR, **kwargs)

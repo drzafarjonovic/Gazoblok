@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, canon, say, build_keyboard
+from translation import Tkey, canon, say, say_error, esc, build_keyboard
 
 router = Router()
 
@@ -93,16 +93,16 @@ async def users_royxati(message: Message):
             status = "✅" if u["faol"] else "❌"
             rol_nomi = ROLLAR_NOMI.get(u["rol"], u["rol"])
             text += (
-                f"{status} {u['ism']}\n"
+                f"{status} {esc(u['ism'])}\n"
                 f"   ID: <code>{u['id']}</code>\n"
                 f"   Rol: {rol_nomi}\n"
-                f"   @{u['username'] or 'username yoq'}\n\n"
+                f"   @{esc(u['username']) if u['username'] else 'username yoq'}\n\n"
             )
         if len(text) > 4000:
             text = text[:4000] + "\n..."
         await say(message, text, parse_mode="HTML", reply_markup=await users_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(Tkey("➕ Foydalanuvchi qo'shish"))
@@ -165,7 +165,7 @@ async def user_rol_kiritish(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await users_menu(message.from_user.id))
+        await say_error(message, e, reply_markup=await users_menu(message.from_user.id))
 
 
 @router.message(Tkey("✏️ Rol o'zgartirish"))
@@ -182,11 +182,11 @@ async def rol_ozgartirish(message: Message, state: FSMContext):
         text = "✏️ Qaysi foydalanuvchi rolini o'zgartirish?\nID raqamini kiriting:\n\n"
         for u in faol_users:
             rol_nomi = ROLLAR_NOMI.get(u["rol"], u["rol"])
-            text += f"🔹 <code>{u['id']}</code> — {u['ism']} ({rol_nomi})\n"
+            text += f"🔹 <code>{u['id']}</code> — {esc(u['ism'])} ({rol_nomi})\n"
         await state.set_state(UserEditState.user_id)
         await say(message, text, parse_mode="HTML")
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(UserEditState.user_id)
@@ -236,7 +236,7 @@ async def rol_ozgartirish_rol(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await users_menu(message.from_user.id))
+        await say_error(message, e, reply_markup=await users_menu(message.from_user.id))
 
 
 @router.message(Tkey("🗑️ Foydalanuvchini o'chirish"))
@@ -253,11 +253,11 @@ async def user_ochirish(message: Message, state: FSMContext):
         text = "🗑️ Qaysi foydalanuvchini o'chirish?\nID raqamini kiriting:\n\n"
         for u in faol_users:
             rol_nomi = ROLLAR_NOMI.get(u["rol"], u["rol"])
-            text += f"🔹 <code>{u['id']}</code> — {u['ism']} ({rol_nomi})\n"
+            text += f"🔹 <code>{u['id']}</code> — {esc(u['ism'])} ({rol_nomi})\n"
         await state.set_state(UserDeleteState.user_id)
         await say(message, text, parse_mode="HTML")
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(UserDeleteState.user_id)
@@ -289,7 +289,7 @@ async def user_ochirish_id(message: Message, state: FSMContext):
         await state.clear()
     except Exception as e:
         await state.clear()
-        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await users_menu(message.from_user.id))
+        await say_error(message, e, reply_markup=await users_menu(message.from_user.id))
 
 
 @router.message(Tkey("📋 Audit log"))
@@ -316,4 +316,4 @@ async def audit_log(message: Message):
             text = text[:4000] + "\n..."
         await say(message, text, reply_markup=await users_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)

@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, eq, say, build_keyboard, foydalanuvchi_tili, tarjima_qil, t, register_ui
+from translation import Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil, t, register_ui
 
 router = Router()
 
@@ -291,8 +291,7 @@ async def oxirgi_ochirish(message: Message):
         else:
             await say(message, tafsilot, reply_markup=await production_menu(message.from_user.id))
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await production_menu(message.from_user.id)
         )

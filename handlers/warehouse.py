@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, say, build_keyboard
+from translation import Tkey, say, say_error, build_keyboard
 
 router = Router()
 
@@ -77,9 +77,8 @@ async def joriy_qoldiqlar(message: Message):
 
         await say(message, text, reply_markup=await warehouse_menu(message.from_user.id))
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await warehouse_menu(message.from_user.id)
         )
 
@@ -109,9 +108,8 @@ async def xom_ashyo_kirim(message: Message, state: FSMContext):
         await state.set_state(WarehouseState.material_id)
         await say(message, text)
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await warehouse_menu(message.from_user.id)
         )
 
@@ -148,9 +146,8 @@ async def kirim_material(message: Message, state: FSMContext):
         await say(message, "❌ Faqat raqam kiriting! Misol: 1")
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await warehouse_menu(message.from_user.id)
         )
 
@@ -181,9 +178,8 @@ async def kirim_miqdor(message: Message, state: FSMContext):
         await say(message, "❌ Faqat musbat son kiriting! Misol: 10")
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await warehouse_menu(message.from_user.id)
         )
 
@@ -246,8 +242,7 @@ async def kirim_birlik(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await warehouse_menu(message.from_user.id)
         )

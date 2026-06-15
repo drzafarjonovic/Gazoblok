@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import timezone, timedelta
 import database as db
-from translation import Tkey, canon, say, build_keyboard
+from translation import Tkey, canon, say, say_error, build_keyboard
 
 router = Router()
 
@@ -133,7 +133,7 @@ async def inv_izoh(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await inventory_menu(message.from_user.id))
+        await say_error(message, e, reply_markup=await inventory_menu(message.from_user.id))
 
 
 @router.message(Tkey("📋 Inventarizatsiya tarixi"))
@@ -166,4 +166,4 @@ async def inv_tarixi(message: Message):
             text = text[:4000] + "\n..."
         await say(message, text, reply_markup=await inventory_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)

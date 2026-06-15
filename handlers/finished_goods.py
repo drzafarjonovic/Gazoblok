@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, eq, canon, say, build_keyboard
+from translation import Tkey, eq, canon, say, say_error, build_keyboard
 
 router = Router()
 
@@ -59,9 +59,8 @@ async def tayyor_qoldiq(message: Message):
         text += f"\n📊 Jami: {jami} ta"
         await say(message, text, reply_markup=await finished_menu(message.from_user.id))
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await finished_menu(message.from_user.id)
         )
 
@@ -88,9 +87,8 @@ async def dastlabki_qoldiq(message: Message, state: FSMContext):
 
         await say(message, text, reply_markup=await block_type_menu(message.from_user.id))
     except Exception as e:
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await finished_menu(message.from_user.id)
         )
 
@@ -119,9 +117,8 @@ async def finished_block_type(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await finished_menu(message.from_user.id)
         )
 
@@ -160,8 +157,7 @@ async def finished_miqdor(message: Message, state: FSMContext):
         await say(message, "❌ Faqat musbat son kiriting! Misol: 500")
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await finished_menu(message.from_user.id)
         )

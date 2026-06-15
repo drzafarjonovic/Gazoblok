@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import (
@@ -11,7 +12,7 @@ from typing import Callable, Dict, Any, Awaitable
 import database as db
 from translation import (
     t, tarjima_qil, foydalanuvchi_tili, invalidate_til_cache,
-    build_keyboard, Tkey, TIL_NOMLARI, prewarm, ensure_warm,
+    build_keyboard, Tkey, TIL_NOMLARI, prewarm, ensure_warm, esc, log_exc,
 )
 from handlers import (settings, production, sales, warehouse,
                       reports, finished_goods, users, permissions, inventory)
@@ -209,9 +210,9 @@ async def start(message: Message):
                 await bot.send_message(
                     int(admin_id),
                     f"🔔 Yangi foydalanuvchi kirmoqchi:\n"
-                    f"👤 Ism: {ism}\n"
+                    f"👤 Ism: {esc(ism)}\n"
                     f"🆔 ID: <code>{user_id}</code>\n"
-                    f"@{username or 'username yoq'}\n\n"
+                    f"@{esc(username) if username else 'username yoq'}\n\n"
                     f"👥 Foydalanuvchilar → ➕ Foydalanuvchi qo'shish",
                     parse_mode="HTML"
                 )
@@ -328,11 +329,15 @@ async def hisobot_scheduler():
                         await reports.avtomatik_hisobot(bot, int(chat_id))
                     last_sent_minute = joriy_minut
         except Exception as e:
-            print(f"Scheduler xato: {e}")
+            log_exc("scheduler", e)
         await asyncio.sleep(30)
 
 
 async def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
     await db.init_db()
     asyncio.create_task(hisobot_scheduler())
     await dp.start_polling(bot)

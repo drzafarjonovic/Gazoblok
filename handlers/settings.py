@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
 from translation import (
-    Tkey, say, build_keyboard, t, invalidate_til_cache, prewarm, TIL_NOMLARI,
+    Tkey, say, say_error, build_keyboard, t, invalidate_til_cache, prewarm, TIL_NOMLARI,
 )
 
 router = Router()
@@ -135,9 +135,8 @@ async def material_birlik(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
@@ -162,7 +161,7 @@ async def materiallar_royxati(message: Message):
             text += f"🔹 {m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
         await say(message, text, reply_markup=await sozlamalar_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 # ── Materialni tahrirlash ──
@@ -188,7 +187,7 @@ async def material_tahrirlash(message: Message, state: FSMContext):
         await state.set_state(MaterialEditState.material_id)
         await say(message, text)
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(MaterialEditState.material_id)
@@ -263,9 +262,8 @@ async def material_tahrirlash_birlik(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
@@ -295,7 +293,7 @@ async def material_ochirish(message: Message, state: FSMContext):
         await state.set_state(MaterialDeleteState.material_id)
         await say(message, text)
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(MaterialDeleteState.material_id)
@@ -329,9 +327,8 @@ async def material_ochirish_id(message: Message, state: FSMContext):
         await state.clear()
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
@@ -360,7 +357,7 @@ async def qolip_formulasi(message: Message):
             text += f"🔹 {f[0]}: {f[1]} {f[2]}\n"
         await say(message, text, reply_markup=keyboard)
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(Tkey("✏️ Formulani yangilash"))
@@ -392,7 +389,7 @@ async def formula_yangilash(message: Message, state: FSMContext):
         )
     except Exception as e:
         await state.clear()
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(FormulaState.miqdor)
@@ -455,9 +452,8 @@ async def formula_birlik(message: Message, state: FSMContext):
             )
     except Exception as e:
         await state.clear()
-        await say(
-            message,
-            f"❌ Xatolik: {str(e)}",
+        await say_error(
+            message, e,
             reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
@@ -491,7 +487,7 @@ async def min_chegara(message: Message, state: FSMContext):
             f"Misol: 5"
         )
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(MinChegaraState.miqdor)
@@ -548,7 +544,7 @@ async def avto_hisobot(message: Message, state: FSMContext):
             f"O'chirish uchun: 0"
         )
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(AutoHisobotState.vaqt)
@@ -629,7 +625,7 @@ async def barchani_tozalash_ha(message: Message):
             reply_markup=await sozlamalar_menu(message.from_user.id)
         )
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(Tkey("❌ Yo'q, bekor qilish"))

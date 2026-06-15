@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, canon, say, build_keyboard
+from translation import Tkey, canon, say, say_error, esc, build_keyboard
 
 router = Router()
 
@@ -195,7 +195,7 @@ async def user_huquqlari(message: Message, state: FSMContext):
         return
     text = "👤 Qaysi foydalanuvchi?\nID raqamini kiriting:\n\n"
     for u in faol_users:
-        text += f"🔹 <code>{u['id']}</code> — {u['ism']} ({u['rol']})\n"
+        text += f"🔹 <code>{u['id']}</code> — {esc(u['ism'])} ({u['rol']})\n"
     await state.set_state(UserPermState.user_id)
     await say(message, text, parse_mode="HTML")
 
@@ -309,4 +309,4 @@ async def huquqlar_royxati(message: Message):
             text = text[:4000] + "\n..."
         await say(message, text, reply_markup=await permissions_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)

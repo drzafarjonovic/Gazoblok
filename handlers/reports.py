@@ -5,7 +5,7 @@ import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 import database as db
-from translation import Tkey, say, build_keyboard, t
+from translation import Tkey, say, say_error, build_keyboard, t, log_exc, GENERIC_ERROR
 
 # GMT+5 timezone
 TOSHKENT_TZ = timezone(timedelta(hours=5))
@@ -97,7 +97,8 @@ async def hisobot_matni(boshliq, oxiri, sarlavha):
             f"🏪 Xom ashyo qoldig'i:\n{ombor}"
         )
     except Exception as e:
-        return f"❌ Hisobot xatoligi: {str(e)}"
+        log_exc("hisobot_matni", e)
+        return GENERIC_ERROR
 
 
 @router.message(Tkey("📊 Hisobot"))
@@ -200,7 +201,7 @@ async def tafsilotli_hisobot(message: Message):
             text = text[:4000] + "\n..."
         await say(message, text, reply_markup=await reports_menu(message.from_user.id))
     except Exception as e:
-        await say(message, f"❌ Xatolik: {str(e)}")
+        await say_error(message, e)
 
 
 @router.message(Tkey("📥 Excel hisobot"))
@@ -353,7 +354,7 @@ async def excel_hisobot(message: Message):
             caption=caption
         )
     except Exception as e:
-        await say(message, f"❌ Excel xatoligi: {str(e)}")
+        await say_error(message, e)
 
 
 async def avtomatik_hisobot(bot, chat_id):
@@ -364,4 +365,4 @@ async def avtomatik_hisobot(bot, chat_id):
         text = await t(text, chat_id)
         await bot.send_message(chat_id, text)
     except Exception as e:
-        print(f"Avtomatik hisobot xatoligi: {e}")
+        log_exc("avtomatik_hisobot", e)
