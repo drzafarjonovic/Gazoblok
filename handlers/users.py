@@ -1,13 +1,16 @@
 from aiogram import Router
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
+    BufferedInputFile,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import timezone, timedelta
+import csv
+import io
 import database as db
 import valyuta as val
-from translation import Tkey, canon, say, say_error, esc, build_keyboard, t
+from translation import Tkey, canon, eq, say, say_error, esc, build_keyboard, t
 
 router = Router()
 
@@ -59,6 +62,15 @@ class UserProfileState(StatesGroup):
     user_id = State()
 
 
+class UserSearchState(StatesGroup):
+    q = State()
+
+
+class SuperTransferState(StatesGroup):
+    user_id = State()
+    confirm = State()
+
+
 def _vaqt(v, fmt="%d.%m.%Y %H:%M"):
     if hasattr(v, "strftime"):
         if v.tzinfo is None:
@@ -73,12 +85,15 @@ async def users_menu(user_id):
         ["➕ Foydalanuvchi qo'shish"],
         ["📋 Kutilayotgan so'rovlar"],
         ["👤 Foydalanuvchi profili"],
+        ["🔎 Qidirish"],
         ["✏️ Rol o'zgartirish"],
         ["✏️ Ismni o'zgartirish"],
         ["🗑️ Foydalanuvchini bloklash"],
         ["♻️ Bloklangani tiklash"],
         ["🔐 Huquqlar boshqaruvi"],
+        ["🔁 Superadminlikni o'tkazish"],
         ["📋 Audit log"],
+        ["📄 Audit CSV"],
         ["🏠 Asosiy menyu"],
     ])
 
@@ -557,3 +572,118 @@ async def audit_log(message: Message):
                   reply_markup=await users_menu(message.from_user.id))
     except Exception as e:
         await say_error(message, e)
+
+
+
+# ── Qidirish ──
+@router.message(Tkey("🔎 Qidirish"))
+async def qidirish(message: Message, state: FSMContext):
+    if not await _ruxsat(message):
+        return
+    await state.clear()
+    await state.set_state(UserSearchState.q)
+    await say(message, "🔎 Ism, username yoki ID bo'yicha qidiring:")
+
+
+@router.message(UserSearchState.q)
+async def qidirish_natija(message: Message, state: FSMContext):
+    q = message.text.strip().lower()
+    await state.clear()
+    users = await db.get_all_users()
+    natija = []
+    for u in users:
+        if (q in (u["ism"] or "").lower()
+                or q in (u["username"] or "").lower()
+                or q in str(u["id"])):
+            natija.append(u)
+    if not natija:
+        await say(message, "❌ Hech narsa topilmadi.",
+                  reply_markup=await users_menu(message.from_user.id))
+        return
+    text = f"🔎 Natija: {len(natija)} ta\n\n"
+    for u in natija[:30]:
+        status = "✅" if u["faol"] else "🚫"
+        text += (f"{status} {esc(u['ism'])} — {ROLLAR_NOMI.get(u['rol'], u['rol'])}\n"
+                 f"   <code>{u['id']}</code> @{esc(u['username']) if u['username'] else 'yoq'}\n")
+    await say(message, text, parse_mode="HTML",
+              reply_markup=await users_menu(message.from_user.id))
+
+
+# ── Audit CSV ──
+@router.message(Tkey("📄 Audit CSV"))
+async def audit_csv(message: Message):
+    if not await _ruxsat(message):
+        return
+    logs = await db.get_audit_log(500)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Vaqt", "Foydalanuvchi", "Rol", "Amal", "Tafsilot"])
+    for log in logs:
+        w.writerow([_vaqt(log["vaqt"]), log["ism"] or "", log["rol"] or "",
+                    log["amal"] or "", log["tafsilot"] or ""])
+    data = ("\ufeff" + out.getvalue()).encode("utf-8")
+    cap = await t("📄 Audit log (CSV)", message.from_user.id)
+    await message.answer_document(
+        BufferedInputFile(data, "audit_log.csv"), caption=cap)
+
+
+# ── Superadminlikni o'tkazish (faqat superadmin) ──
+@router.message(Tkey("🔁 Superadminlikni o'tkazish"))
+async def super_transfer(message: Message, state: FSMContext):
+    user = await db.get_user(message.from_user.id)
+    if not user or user["rol"] != "superadmin":
+        await say(message, "❌ Bu amal faqat Super Admin uchun!")
+        return
+    await state.clear()
+    await state.set_state(SuperTransferState.user_id)
+    await say(message,
+              "🔁 Yangi Super Admin ID sini kiriting:\n"
+              "⚠️ Siz Direktor roliga o'tasiz!")
+
+
+@router.message(SuperTransferState.user_id)
+async def super_transfer_id(message: Message, state: FSMContext):
+    try:
+        uid = int(message.text.strip())
+    except ValueError:
+        await say(message, "❌ Faqat raqam kiriting!")
+        return
+    target = await db.get_user(uid)
+    if not target:
+        await say(message, "❌ Foydalanuvchi topilmadi!")
+        await state.clear()
+        return
+    if target["rol"] == "superadmin":
+        await say(message, "❌ U allaqachon Super Admin!")
+        await state.clear()
+        return
+    await state.update_data(uid=uid, ism=target["ism"])
+    await state.set_state(SuperTransferState.confirm)
+    kb = await build_keyboard(message.from_user.id, [
+        ["✅ Ha, o'tkazish"], ["❌ Yo'q, bekor qilish"]])
+    await say(message,
+              f"⚠️ DIQQAT!\n{target['ism']} Super Admin bo'ladi, "
+              f"siz Direktor bo'lib qolasiz.\nTasdiqlaysizmi?",
+              reply_markup=kb)
+
+
+@router.message(SuperTransferState.confirm)
+async def super_transfer_confirm(message: Message, state: FSMContext):
+    uz = await canon(message, ["✅ Ha, o'tkazish", "❌ Yo'q, bekor qilish"])
+    data = await state.get_data()
+    await state.clear()
+    if uz != "✅ Ha, o'tkazish":
+        await say(message, "❌ Bekor qilindi.",
+                  reply_markup=await users_menu(message.from_user.id))
+        return
+    uid = data["uid"]
+    await db.update_user_rol(uid, "superadmin")
+    await db.update_user_rol(message.from_user.id, "direktor")
+    await db.set_bot_setting("admin_chat_id", str(uid))
+    await _audit(message, "Superadminlik o'tkazildi",
+                 f"{data['ism']} (ID: {uid}) → superadmin")
+    await _xabar_ber(message.bot, uid,
+                     "👑 Sizga Super Admin huquqi berildi! /start bosing.")
+    await say(message,
+              f"✅ Superadminlik {data['ism']} ga o'tkazildi.\n"
+              f"Siz endi Direktor. /start bosing.")
