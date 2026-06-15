@@ -1,11 +1,12 @@
 import asyncio
 import os
-from aiogram import Bot, Dispatcher, BaseMiddleware
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, TelegramObject
+from aiogram import Bot, Dispatcher, BaseMiddleware, F
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, TelegramObject, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart
 from dotenv import load_dotenv
 from typing import Callable, Dict, Any, Awaitable
 import database as db
+from translation import t, TIL_NOMLARI, TILLAR
 from handlers import (settings, production, sales, warehouse,
                       reports, finished_goods, users, permissions, inventory)
 
@@ -14,6 +15,20 @@ TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+
+# Til tanlash klaviaturasi
+def til_tanlash_keyboard():
+    """Til tanlash uchun InlineKeyboard"""
+    keyboard = []
+    row = []
+    for i, (til_kod, til_nomi) in enumerate(TIL_NOMLARI.items()):
+        row.append(InlineKeyboardButton(text=til_nomi, callback_data=f"til_{til_kod}"))
+        if len(row) == 2:  # 2 ta tugma bir qatorda
+            keyboard.append(row)
+            row = []
+    if row:  # Oxirgi qator
+        keyboard.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # Permission → tugma matni
 PERMISSION_TUGMALAR = {
@@ -153,20 +168,21 @@ async def start(message: Message):
     ism = message.from_user.full_name
     username = message.from_user.username
 
+    # 1. Birinchi superadmin
     superadmin_bor = await db.superadmin_bormi()
     if not superadmin_bor:
-        await db.add_user(user_id, ism, username, "superadmin")
-        await db.set_bot_setting("admin_chat_id", str(user_id))
-        menu = await get_menu(user_id, "superadmin")
+        # Til tanlash
         await message.answer(
-            f"👑 Salom, {ism}!\n"
-            f"Siz Super Admin sifatida ro'yxatdan o'tdingiz!\n\n"
-            f"🧱 GazoBot — Gazoblok ishlab chiqarish boshqaruvi",
-            reply_markup=menu
+            "🌐 Tilni tanlang / Choose your language:",
+            reply_markup=til_tanlash_keyboard()
         )
+        # user_id ni state ga saqlaymiz (keyingi callback uchun)
         return
 
+    # 2. Mavjud user
     user = await db.get_user(user_id)
+    
+    # 3. Yangi user (admin tomonidan qo'shilmagan)
     if not user:
         admin_id = await db.get_bot_setting("admin_chat_id")
         if admin_id:
@@ -191,17 +207,70 @@ async def start(message: Message):
         )
         return
 
+    # 4. Bloklangan user
     if not user["faol"]:
         await message.answer("⛔ Sizning hisobingiz bloklangan!")
         return
 
+    # 5. Til tanlanmaganmi? (mavjud userlar uchun)
+    if not user.get("til"):
+        await message.answer(
+            "🌐 Tilni tanlang / Choose your language:",
+            reply_markup=til_tanlash_keyboard()
+        )
+        return
+
+    # 6. Oddiy /start (til tanlangan, faol user)
     menu = await get_menu(user_id, user["rol"])
     rol_nomi = db.ROLLAR.get(user["rol"], user["rol"])
-    await message.answer(
-        f"Salom, {ism}! 👋\n"
-        f"Rol: {rol_nomi}",
-        reply_markup=menu
-    )
+    xabar = await t(f"Salom, {ism}! 👋\nRol: {rol_nomi}", user_id)
+    await message.answer(xabar, reply_markup=menu)
+
+# ── Til tanlash callback ──
+@dp.callback_query(lambda c: c.data.startswith("til_"))
+async def til_tanlash_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    ism = callback.from_user.full_name
+    username = callback.from_user.username
+    
+    # til_uz → uz, til_zh-CN → zh-CN
+    til_kod = callback.data.split("_", 1)[1]
+    
+    # Superadmin yaratish (agar birinchi user bo'lsa)
+    superadmin_bor = await db.superadmin_bormi()
+    if not superadmin_bor:
+        await db.add_user(user_id, ism, username, "superadmin")
+        await db.update_user_til(user_id, til_kod)
+        await db.set_bot_setting("admin_chat_id", str(user_id))
+        menu = await get_menu(user_id, "superadmin")
+        xabar = await t(
+            f"👑 Salom, {ism}!\n"
+            f"Siz Super Admin sifatida ro'yxatdan o'tdingiz!\n\n"
+            f"🧱 GazoBot — Gazoblok ishlab chiqarish boshqaruvi",
+            user_id
+        )
+        await callback.message.edit_text(xabar)
+        await callback.message.answer("Menu:", reply_markup=menu)
+        await callback.answer()
+        return
+    
+    # Mavjud user uchun tilni saqlash
+    await db.update_user_til(user_id, til_kod)
+    
+    # Tasdiqlash xabari (tanlangan tilda)
+    xabar_tasdiqlash = await t("✅ Til o'zgartirildi!", user_id)
+    
+    user = await db.get_user(user_id)
+    if user and user["faol"]:
+        menu = await get_menu(user_id, user["rol"])
+        rol_nomi = db.ROLLAR.get(user["rol"], user["rol"])
+        xabar = await t(f"Salom, {ism}! 👋\nRol: {rol_nomi}", user_id)
+        await callback.message.edit_text(xabar_tasdiqlash)
+        await callback.message.answer(xabar, reply_markup=menu)
+    else:
+        await callback.message.edit_text(xabar_tasdiqlash)
+    
+    await callback.answer()
 
 # ── Asosiy menyu ──
 @dp.message(lambda m: m.text == "🏠 Asosiy menyu")

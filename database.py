@@ -154,6 +154,7 @@ async def init_db():
                 ism TEXT NOT NULL,
                 username TEXT,
                 rol TEXT NOT NULL DEFAULT 'ishchi',
+                til TEXT DEFAULT 'uz',
                 qoshilgan_vaqt TIMESTAMP DEFAULT NOW(),
                 faol BOOLEAN DEFAULT TRUE
             )
@@ -273,6 +274,16 @@ async def init_db():
                 izoh TEXT,
                 user_id BIGINT,
                 vaqt TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        # Translations jadvali (multilingual)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS translations (
+                id SERIAL PRIMARY KEY,
+                original TEXT NOT NULL,
+                til TEXT NOT NULL,
+                tarjima TEXT NOT NULL,
+                UNIQUE(original, til)
             )
         """)
         await conn.execute("""
@@ -904,3 +915,34 @@ async def set_min_chegara(material_id, min_chegara):
             INSERT INTO settings (material_id, min_chegara) VALUES ($1,$2)
             ON CONFLICT (material_id) DO UPDATE SET min_chegara=$2
         """, material_id, min_chegara)
+
+
+
+# ── Multilingual (Translations) ──
+async def get_translation(original: str, til: str):
+    """Tarjimani Supabase dan olish (cache)"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT tarjima FROM translations WHERE original=$1 AND til=$2",
+            original, til
+        )
+        return row["tarjima"] if row else None
+
+async def save_translation(original: str, til: str, tarjima: str):
+    """Tarjimani Supabase ga saqlash"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO translations (original, til, tarjima)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (original, til) DO NOTHING
+        """, original, til, tarjima)
+
+async def update_user_til(user_id: int, til: str):
+    """Foydalanuvchi tilini yangilash"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET til=$1 WHERE id=$2", til, user_id
+        )

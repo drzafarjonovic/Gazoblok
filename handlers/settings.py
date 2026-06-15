@@ -1,8 +1,9 @@
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
+from translation import TIL_NOMLARI
 
 router = Router()
 
@@ -33,6 +34,7 @@ class AutoHisobotState(StatesGroup):
 def sozlamalar_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="🌐 Tilni o'zgartirish")],
             [KeyboardButton(text="➕ Material qo'shish")],
             [KeyboardButton(text="📦 Materiallar ro'yxati")],
             [KeyboardButton(text="✏️ Materialni tahrirlash")],
@@ -558,3 +560,50 @@ async def barchani_tozalash_yoq(message: Message):
         "❌ Bekor qilindi!",
         reply_markup=sozlamalar_menu()
     )
+
+
+
+# ── Til o'zgartirish ──
+def til_tanlash_keyboard():
+    """Til tanlash uchun InlineKeyboard"""
+    keyboard = []
+    row = []
+    for i, (til_kod, til_nomi) in enumerate(TIL_NOMLARI.items()):
+        row.append(InlineKeyboardButton(text=til_nomi, callback_data=f"til_{til_kod}"))
+        if len(row) == 2:  # 2 ta tugma bir qatorda
+            keyboard.append(row)
+            row = []
+    if row:  # Oxirgi qator
+        keyboard.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+@router.message(F.text == "🌐 Tilni o'zgartirish")
+async def til_ozgartirish(message: Message):
+    user = await db.get_user(message.from_user.id)
+    hozirgi_til = user.get("til", "uz") if user else "uz"
+    til_nomi = TIL_NOMLARI.get(hozirgi_til, "🇺🇿 O'zbek")
+    
+    await message.answer(
+        f"🌐 Hozirgi til: {til_nomi}\n\n"
+        f"Yangi tilni tanlang:",
+        reply_markup=til_tanlash_keyboard()
+    )
+
+@router.callback_query(lambda c: c.data.startswith("til_") and c.data != "til_tanlash")
+async def til_ozgartirish_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    til_kod = callback.data.split("_", 1)[1]
+    
+    # Tilni saqlash
+    await db.update_user_til(user_id, til_kod)
+    
+    # Tasdiqlash (yangi tilda)
+    from translation import t
+    xabar = await t("✅ Til o'zgartirildi!", user_id)
+    
+    await callback.message.edit_text(xabar)
+    await callback.message.answer(
+        "⚙️ Sozlamalar:",
+        reply_markup=sozlamalar_menu()
+    )
+    await callback.answer()
