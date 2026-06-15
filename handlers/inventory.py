@@ -1,45 +1,47 @@
-from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram import Router
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import timezone, timedelta
 import database as db
+from translation import Tkey, canon, say, build_keyboard
 
 router = Router()
 
 # GMT+5 timezone
 TOSHKENT_TZ = timezone(timedelta(hours=5))
 
+BLOCK_BUTTONS = {"A blok": "A", "B blok": "B"}
+
+
 class InventarizatsiyaState(StatesGroup):
     block_type = State()
     real_hisob = State()
     izoh = State()
 
-def inventory_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📊 Inventarizatsiya kiritish")],
-            [KeyboardButton(text="📋 Inventarizatsiya tarixi")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
 
-def block_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="A blok")],
-            [KeyboardButton(text="B blok")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
+async def inventory_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["📊 Inventarizatsiya kiritish"],
+        ["📋 Inventarizatsiya tarixi"],
+        ["🏠 Asosiy menyu"],
+    ])
 
-@router.message(F.text == "📋 Inventarizatsiya")
+
+async def block_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["A blok"],
+        ["B blok"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+@router.message(Tkey("📋 Inventarizatsiya"))
 async def inventarizatsiya(message: Message):
-    await message.answer("📋 Inventarizatsiya:", reply_markup=inventory_menu())
+    await say(message, "📋 Inventarizatsiya:", reply_markup=await inventory_menu(message.from_user.id))
 
-@router.message(F.text == "📊 Inventarizatsiya kiritish")
+
+@router.message(Tkey("📊 Inventarizatsiya kiritish"))
 async def inv_kiritish(message: Message, state: FSMContext):
     await state.clear()
     goods = await db.get_finished_goods()
@@ -48,23 +50,27 @@ async def inv_kiritish(message: Message, state: FSMContext):
         text += f"   {g[0]} blok: {g[1]} ta\n"
     text += "\nQaysi blok uchun inventarizatsiya?"
     await state.set_state(InventarizatsiyaState.block_type)
-    await message.answer(text, reply_markup=block_menu())
+    await say(message, text, reply_markup=await block_menu(message.from_user.id))
+
 
 @router.message(InventarizatsiyaState.block_type)
 async def inv_block_type(message: Message, state: FSMContext):
-    if message.text not in ["A blok", "B blok"]:
-        await message.answer("❌ Tugmalardan birini tanlang!")
+    uz = await canon(message, list(BLOCK_BUTTONS.keys()))
+    if not uz:
+        await say(message, "❌ Tugmalardan birini tanlang!")
         return
-    block_type = "A" if message.text == "A blok" else "B"
+    block_type = BLOCK_BUTTONS[uz]
     goods = await db.get_finished_goods()
     bot_hisob = next((g[1] for g in goods if g[0] == block_type), 0)
     await state.update_data(block_type=block_type, bot_hisob=bot_hisob)
     await state.set_state(InventarizatsiyaState.real_hisob)
-    await message.answer(
+    await say(
+        message,
         f"🧱 {block_type} blok\n"
         f"Bot hisob: {bot_hisob} ta\n\n"
         f"Real (haqiqiy) soni nechta?"
     )
+
 
 @router.message(InventarizatsiyaState.real_hisob)
 async def inv_real_hisob(message: Message, state: FSMContext):
@@ -77,14 +83,16 @@ async def inv_real_hisob(message: Message, state: FSMContext):
         data = await state.get_data()
         farq = real_hisob - data["bot_hisob"]
         farq_text = f"+{farq}" if farq > 0 else str(farq)
-        await message.answer(
+        await say(
+            message,
             f"📊 Farq: {farq_text} ta\n\n"
             f"Izoh kiriting (ixtiyoriy):\n"
             f"Misol: Hisobdan ko'ra kam chiqdi\n"
             f"Yoki: 0 (izohsiz)"
         )
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting!")
+        await say(message, "❌ Faqat musbat son kiriting!")
+
 
 @router.message(InventarizatsiyaState.izoh)
 async def inv_izoh(message: Message, state: FSMContext):
@@ -113,30 +121,31 @@ async def inv_izoh(message: Message, state: FSMContext):
         )
         await state.clear()
         farq_text = f"+{farq}" if farq > 0 else str(farq)
-        await message.answer(
+        await say(
+            message,
             f"✅ Inventarizatsiya saqlandi!\n\n"
             f"🧱 {block_type} blok\n"
             f"   Bot hisob: {bot_hisob} ta\n"
             f"   Real hisob: {real_hisob} ta\n"
             f"   Farq: {farq_text} ta\n"
             f"   Bot yangilandi: {real_hisob} ta",
-            reply_markup=inventory_menu()
+            reply_markup=await inventory_menu(message.from_user.id)
         )
     except Exception as e:
         await state.clear()
-        await message.answer(f"❌ Xatolik: {str(e)}", reply_markup=inventory_menu())
+        await say(message, f"❌ Xatolik: {str(e)}", reply_markup=await inventory_menu(message.from_user.id))
 
-@router.message(F.text == "📋 Inventarizatsiya tarixi")
+
+@router.message(Tkey("📋 Inventarizatsiya tarixi"))
 async def inv_tarixi(message: Message):
     try:
         logs = await db.get_inventarizatsiya_tarixi(20)
         if not logs:
-            await message.answer("📋 Inventarizatsiya tarixi bo'sh.", reply_markup=inventory_menu())
+            await say(message, "📋 Inventarizatsiya tarixi bo'sh.", reply_markup=await inventory_menu(message.from_user.id))
             return
         text = "📋 Inventarizatsiya tarixi:\n\n"
         for log in logs:
             vaqt = log["vaqt"]
-            # GMT+5 ga o'girish
             if hasattr(vaqt, "strftime"):
                 if vaqt.tzinfo is None:
                     vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
@@ -155,6 +164,6 @@ async def inv_tarixi(message: Message):
             text += "\n"
         if len(text) > 4000:
             text = text[:4000] + "\n..."
-        await message.answer(text, reply_markup=inventory_menu())
+        await say(message, text, reply_markup=await inventory_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")

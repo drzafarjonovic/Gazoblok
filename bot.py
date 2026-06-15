@@ -1,27 +1,44 @@
 import asyncio
 import os
-from aiogram import Bot, Dispatcher, BaseMiddleware, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, TelegramObject, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram import Bot, Dispatcher, BaseMiddleware
+from aiogram.types import (
+    Message, TelegramObject,
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
+)
 from aiogram.filters import CommandStart
 from dotenv import load_dotenv
 from typing import Callable, Dict, Any, Awaitable
 import database as db
-from translation import t, TIL_NOMLARI, TILLAR
+from translation import (
+    t, tarjima_qil, foydalanuvchi_tili, invalidate_til_cache,
+    build_keyboard, Tkey, TIL_NOMLARI,
+)
 from handlers import (settings, production, sales, warehouse,
                       reports, finished_goods, users, permissions, inventory)
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN muhit o'zgaruvchisi belgilanmagan! "
+        ".env faylida BOT_TOKEN=... ni kiriting."
+    )
+if not os.getenv("DATABASE_URL"):
+    raise RuntimeError(
+        "DATABASE_URL muhit o'zgaruvchisi belgilanmagan! "
+        ".env faylida DATABASE_URL=... ni kiriting."
+    )
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Til tanlash klaviaturasi
+
+# Til tanlash klaviaturasi (inline)
 def til_tanlash_keyboard():
     """Til tanlash uchun InlineKeyboard"""
     keyboard = []
     row = []
-    for i, (til_kod, til_nomi) in enumerate(TIL_NOMLARI.items()):
+    for til_kod, til_nomi in TIL_NOMLARI.items():
         row.append(InlineKeyboardButton(text=til_nomi, callback_data=f"til_{til_kod}"))
         if len(row) == 2:  # 2 ta tugma bir qatorda
             keyboard.append(row)
@@ -30,36 +47,20 @@ def til_tanlash_keyboard():
         keyboard.append(row)
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-# Permission → tugma matni
-PERMISSION_TUGMALAR = {
-    "ishlab_chiqarish_kiritish": "🏭 Ishlab chiqarish",
-    "ishlab_chiqarish_korish": "🏭 Ishlab chiqarish",
-    "sotuv_kiritish": "💰 Sotuv",
-    "sotuv_korish": "💰 Sotuv",
-    "ombor_kiritish": "🏪 Ombor",
-    "ombor_korish": "🏪 Ombor",
-    "tayyor_mahsulot_korish": "🏬 Tayyor mahsulot",
-    "tayyor_mahsulot_tahrirlash": "🏬 Tayyor mahsulot",
-    "hisobot_korish": "📊 Hisobot",
-    "excel_hisobot": "📊 Hisobot",
-}
 
 async def get_menu(user_id, rol):
-    """Dinamik menyu — foydalanuvchi permissionlariga qarab"""
+    """Dinamik menyu — foydalanuvchi permissionlariga qarab (tarjima qilingan)."""
     if rol == "superadmin":
-        return ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="🏭 Ishlab chiqarish")],
-                [KeyboardButton(text="💰 Sotuv")],
-                [KeyboardButton(text="🏪 Ombor")],
-                [KeyboardButton(text="🏬 Tayyor mahsulot")],
-                [KeyboardButton(text="📊 Hisobot")],
-                [KeyboardButton(text="📋 Inventarizatsiya")],
-                [KeyboardButton(text="⚙️ Sozlamalar")],
-                [KeyboardButton(text="👥 Foydalanuvchilar")],
-            ],
-            resize_keyboard=True
-        )
+        return await build_keyboard(user_id, [
+            ["🏭 Ishlab chiqarish"],
+            ["💰 Sotuv"],
+            ["🏪 Ombor"],
+            ["🏬 Tayyor mahsulot"],
+            ["📊 Hisobot"],
+            ["📋 Inventarizatsiya"],
+            ["⚙️ Sozlamalar"],
+            ["👥 Foydalanuvchilar"],
+        ])
 
     perms = await db.get_user_permissions(user_id, rol)
     tugmalar = set()
@@ -77,15 +78,15 @@ async def get_menu(user_id, rol):
     if perms.get("tayyor_mahsulot_tahrirlash"):
         tugmalar.add("📋 Inventarizatsiya")
 
-    keyboard = [[KeyboardButton(text=t)] for t in sorted(tugmalar)]
-    if not keyboard:
-        keyboard = [[KeyboardButton(text="🏠 Asosiy menyu")]]
+    rows = [[tugma] for tugma in sorted(tugmalar)]
+    if not rows:
+        rows = [["🏠 Asosiy menyu"]]
+    return await build_keyboard(user_id, rows)
 
-    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 # ── Middleware ──
 class PermissionMiddleware(BaseMiddleware):
-    # Tugma → kerakli permission
+    # Tugma (kanonik o'zbekcha) → kerakli permission
     TUGMA_PERMISSION = {
         "🏭 Ishlab chiqarishni kiritish": "ishlab_chiqarish_kiritish",
         "📋 Bugungi ishlab chiqarish": "ishlab_chiqarish_korish",
@@ -103,6 +104,15 @@ class PermissionMiddleware(BaseMiddleware):
         "📥 Excel hisobot": "excel_hisobot",
         "📋 Inventarizatsiya": "tayyor_mahsulot_tahrirlash",
     }
+
+    async def _kanonik_tugma(self, text: str, til: str):
+        """Kelgan matnni TUGMA_PERMISSION dagi kanonik kalitga moslaydi."""
+        if til == "uz":
+            return text if text in self.TUGMA_PERMISSION else None
+        for uz in self.TUGMA_PERMISSION:
+            if text == await tarjima_qil(uz, til):
+                return uz
+        return None
 
     async def __call__(
         self,
@@ -126,6 +136,7 @@ class PermissionMiddleware(BaseMiddleware):
             )
             return
 
+        # get_user faqat faol userlarni qaytaradi, lekin himoya uchun qoldiramiz
         if not user["faol"]:
             await event.answer("⛔ Sizning hisobingiz bloklangan!")
             return
@@ -135,19 +146,24 @@ class PermissionMiddleware(BaseMiddleware):
             data["user"] = user
             return await handler(event, data)
 
-        # Permission tekshiruvi
-        if event.text in self.TUGMA_PERMISSION:
-            kerakli_perm = self.TUGMA_PERMISSION[event.text]
+        # Permission tekshiruvi (til-aware)
+        til = user.get("til") or "uz"
+        kanonik = await self._kanonik_tugma(event.text or "", til)
+        if kanonik:
+            kerakli_perm = self.TUGMA_PERMISSION[kanonik]
             ruxsat = await db.has_permission(event.from_user.id, user["rol"], kerakli_perm)
             if not ruxsat:
-                await event.answer(
+                xabar = await t(
                     f"⛔ Sizda bu bo'limga kirish huquqi yo'q!\n"
-                    f"Rol: {db.ROLLAR.get(user['rol'], user['rol'])}"
+                    f"Rol: {db.ROLLAR.get(user['rol'], user['rol'])}",
+                    event.from_user.id
                 )
+                await event.answer(xabar)
                 return
 
         data["user"] = user
         return await handler(event, data)
+
 
 # ── Routerlar ──
 dp.message.middleware(PermissionMiddleware())
@@ -160,6 +176,7 @@ dp.include_router(sales.router)
 dp.include_router(warehouse.router)
 dp.include_router(reports.router)
 dp.include_router(finished_goods.router)
+
 
 # ── /start ──
 @dp.message(CommandStart())
@@ -176,12 +193,11 @@ async def start(message: Message):
             "🌐 Tilni tanlang / Choose your language:",
             reply_markup=til_tanlash_keyboard()
         )
-        # user_id ni state ga saqlaymiz (keyingi callback uchun)
         return
 
     # 2. Mavjud user
     user = await db.get_user(user_id)
-    
+
     # 3. Yangi user (admin tomonidan qo'shilmagan)
     if not user:
         admin_id = await db.get_bot_setting("admin_chat_id")
@@ -226,21 +242,23 @@ async def start(message: Message):
     xabar = await t(f"Salom, {ism}! 👋\nRol: {rol_nomi}", user_id)
     await message.answer(xabar, reply_markup=menu)
 
+
 # ── Til tanlash callback ──
-@dp.callback_query(lambda c: c.data.startswith("til_"))
+@dp.callback_query(lambda c: c.data and c.data.startswith("til_"))
 async def til_tanlash_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     ism = callback.from_user.full_name
     username = callback.from_user.username
-    
+
     # til_uz → uz, til_zh-CN → zh-CN
     til_kod = callback.data.split("_", 1)[1]
-    
+
     # Superadmin yaratish (agar birinchi user bo'lsa)
     superadmin_bor = await db.superadmin_bormi()
     if not superadmin_bor:
         await db.add_user(user_id, ism, username, "superadmin")
         await db.update_user_til(user_id, til_kod)
+        invalidate_til_cache(user_id)
         await db.set_bot_setting("admin_chat_id", str(user_id))
         menu = await get_menu(user_id, "superadmin")
         xabar = await t(
@@ -250,16 +268,18 @@ async def til_tanlash_callback(callback: CallbackQuery):
             user_id
         )
         await callback.message.edit_text(xabar)
-        await callback.message.answer("Menu:", reply_markup=menu)
+        menu_matn = await t("Menyu:", user_id)
+        await callback.message.answer(menu_matn, reply_markup=menu)
         await callback.answer()
         return
-    
+
     # Mavjud user uchun tilni saqlash
     await db.update_user_til(user_id, til_kod)
-    
+    invalidate_til_cache(user_id)
+
     # Tasdiqlash xabari (tanlangan tilda)
     xabar_tasdiqlash = await t("✅ Til o'zgartirildi!", user_id)
-    
+
     user = await db.get_user(user_id)
     if user and user["faol"]:
         menu = await get_menu(user_id, user["rol"])
@@ -269,16 +289,19 @@ async def til_tanlash_callback(callback: CallbackQuery):
         await callback.message.answer(xabar, reply_markup=menu)
     else:
         await callback.message.edit_text(xabar_tasdiqlash)
-    
+
     await callback.answer()
 
+
 # ── Asosiy menyu ──
-@dp.message(lambda m: m.text == "🏠 Asosiy menyu")
+@dp.message(Tkey("🏠 Asosiy menyu"))
 async def asosiy(message: Message):
     user = await db.get_user(message.from_user.id)
     if user and user["faol"]:
         menu = await get_menu(message.from_user.id, user["rol"])
-        await message.answer("🏠 Asosiy menyu:", reply_markup=menu)
+        xabar = await t("🏠 Asosiy menyu:", message.from_user.id)
+        await message.answer(xabar, reply_markup=menu)
+
 
 # ── Scheduler ──
 async def hisobot_scheduler():
@@ -303,10 +326,12 @@ async def hisobot_scheduler():
             print(f"Scheduler xato: {e}")
         await asyncio.sleep(30)
 
+
 async def main():
     await db.init_db()
     asyncio.create_task(hisobot_scheduler())
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

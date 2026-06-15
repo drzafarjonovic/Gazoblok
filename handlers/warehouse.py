@@ -1,8 +1,9 @@
-from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram import Router
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
+from translation import Tkey, say, build_keyboard
 
 router = Router()
 
@@ -13,36 +14,39 @@ BARCHA_BIRLIKLAR = [
     "litr", "l", "ml", "millilitr", "m3", "kubometr", "kub", "dl", "cl"
 ]
 
+
 class WarehouseState(StatesGroup):
     material_id = State()
     miqdor = State()
     birlik = State()
 
-def warehouse_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📥 Xom ashyo kirim")],
-            [KeyboardButton(text="🏪 Joriy qoldiqlar")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
-    )
 
-@router.message(F.text == "🏪 Ombor")
+async def warehouse_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["📥 Xom ashyo kirim"],
+        ["🏪 Joriy qoldiqlar"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+@router.message(Tkey("🏪 Ombor"))
 async def ombor(message: Message):
-    await message.answer(
+    await say(
+        message,
         "🏪 Ombor bo'limi:",
-        reply_markup=warehouse_menu()
+        reply_markup=await warehouse_menu(message.from_user.id)
     )
 
-@router.message(F.text == "🏪 Joriy qoldiqlar")
+
+@router.message(Tkey("🏪 Joriy qoldiqlar"))
 async def joriy_qoldiqlar(message: Message):
     try:
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Hali material kiritilmagan!",
-                reply_markup=warehouse_menu()
+                reply_markup=await warehouse_menu(message.from_user.id)
             )
             return
 
@@ -55,7 +59,6 @@ async def joriy_qoldiqlar(message: Message):
             material_id = m[0]
             nomi = m[1]
             qoldiq_asosiy = m[2]
-            asosiy_birlik = m[3]
             asl_birlik = m[4]
 
             qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
@@ -72,23 +75,26 @@ async def joriy_qoldiqlar(message: Message):
                 min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
                 text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
 
-        await message.answer(text, reply_markup=warehouse_menu())
+        await say(message, text, reply_markup=await warehouse_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=warehouse_menu()
+            reply_markup=await warehouse_menu(message.from_user.id)
         )
 
-@router.message(F.text == "📥 Xom ashyo kirim")
+
+@router.message(Tkey("📥 Xom ashyo kirim"))
 async def xom_ashyo_kirim(message: Message, state: FSMContext):
     try:
         await state.clear()
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Avval material qo'shing!\n"
                 "⚙️ Sozlamalar → ➕ Material qo'shish",
-                reply_markup=warehouse_menu()
+                reply_markup=await warehouse_menu(message.from_user.id)
             )
             return
 
@@ -101,12 +107,14 @@ async def xom_ashyo_kirim(message: Message, state: FSMContext):
             materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials]
         )
         await state.set_state(WarehouseState.material_id)
-        await message.answer(text)
+        await say(message, text)
     except Exception as e:
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=warehouse_menu()
+            reply_markup=await warehouse_menu(message.from_user.id)
         )
+
 
 @router.message(WarehouseState.material_id)
 async def kirim_material(message: Message, state: FSMContext):
@@ -117,7 +125,8 @@ async def kirim_material(message: Message, state: FSMContext):
         material = next((m for m in materials if m[0] == material_id), None)
 
         if not material:
-            await message.answer(
+            await say(
+                message,
                 "❌ Bunday raqam yo'q!\n"
                 "Qaytadan kiriting:"
             )
@@ -130,18 +139,21 @@ async def kirim_material(message: Message, state: FSMContext):
             joriy_qoldiq_asosiy=material[2]
         )
         await state.set_state(WarehouseState.miqdor)
-        await message.answer(
+        await say(
+            message,
             f"📥 {material[1]} dan qancha keldi?\n"
             f"Misol: 10"
         )
     except ValueError:
-        await message.answer("❌ Faqat raqam kiriting! Misol: 1")
+        await say(message, "❌ Faqat raqam kiriting! Misol: 1")
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=warehouse_menu()
+            reply_markup=await warehouse_menu(message.from_user.id)
         )
+
 
 @router.message(WarehouseState.miqdor)
 async def kirim_miqdor(message: Message, state: FSMContext):
@@ -158,20 +170,23 @@ async def kirim_miqdor(message: Message, state: FSMContext):
         og_birliklar = "tonna, kg, g, gramm, mg, meshok"
         hajm_birliklar = "litr, ml, m3, kubometr"
 
-        await message.answer(
+        await say(
+            message,
             f"Birligini kiriting:\n"
             f"(Ombordagi birlik: {asl_birlik})\n\n"
             f"Og'irlik: {og_birliklar}\n"
             f"Hajm: {hajm_birliklar}"
         )
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 10")
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 10")
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=warehouse_menu()
+            reply_markup=await warehouse_menu(message.from_user.id)
         )
+
 
 @router.message(WarehouseState.birlik)
 async def kirim_birlik(message: Message, state: FSMContext):
@@ -180,7 +195,8 @@ async def kirim_birlik(message: Message, state: FSMContext):
 
         # Birlik to'g'riligini tekshirish
         if birlik not in BARCHA_BIRLIKLAR:
-            await message.answer(
+            await say(
+                message,
                 f"❌ '{birlik}' birlik tanilmadi!\n\n"
                 f"Og'irlik uchun: tonna, kg, g, gramm, mg, meshok\n"
                 f"Hajm uchun: litr, ml, m3, kubometr\n\n"
@@ -220,16 +236,18 @@ async def kirim_birlik(message: Message, state: FSMContext):
         await state.clear()
 
         yangi_qoldiq_asl = db.asosiydan_birlikga(yangi_qoldiq_asosiy, asl_birlik)
-        await message.answer(
+        await say(
+            message,
             f"✅ Kirim kiritildi!\n\n"
             f"📦 {data['material_nomi']}\n"
             f"   Kirim: +{miqdor} {birlik}\n"
             f"   Yangi qoldiq: {yangi_qoldiq_asl:.2f} {asl_birlik}",
-            reply_markup=warehouse_menu()
+            reply_markup=await warehouse_menu(message.from_user.id)
         )
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=warehouse_menu()
+            reply_markup=await warehouse_menu(message.from_user.id)
         )

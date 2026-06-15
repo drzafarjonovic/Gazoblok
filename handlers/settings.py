@@ -1,16 +1,22 @@
-from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram import Router
+from aiogram.types import (
+    Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import TIL_NOMLARI
+from translation import (
+    Tkey, say, build_keyboard, t, invalidate_til_cache, TIL_NOMLARI,
+)
 
 router = Router()
+
 
 class MaterialState(StatesGroup):
     nomi = State()
     qoldiq = State()
     birlik = State()
+
 
 class MaterialEditState(StatesGroup):
     material_id = State()
@@ -18,59 +24,75 @@ class MaterialEditState(StatesGroup):
     qoldiq = State()
     birlik = State()
 
+
 class MaterialDeleteState(StatesGroup):
     material_id = State()
+
 
 class FormulaState(StatesGroup):
     miqdor = State()
     birlik = State()
 
+
 class MinChegaraState(StatesGroup):
     miqdor = State()
+
 
 class AutoHisobotState(StatesGroup):
     vaqt = State()
 
-def sozlamalar_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🌐 Tilni o'zgartirish")],
-            [KeyboardButton(text="➕ Material qo'shish")],
-            [KeyboardButton(text="📦 Materiallar ro'yxati")],
-            [KeyboardButton(text="✏️ Materialni tahrirlash")],
-            [KeyboardButton(text="🗑️ Materialni o'chirish")],
-            [KeyboardButton(text="📋 Qolip formulasi")],
-            [KeyboardButton(text="⚠️ Minimum chegara")],
-            [KeyboardButton(text="🔔 Avtomatik hisobot vaqti")],
-            [KeyboardButton(text="🗑️ Barcha ma'lumotlarni tozalash")],
-            [KeyboardButton(text="🏠 Asosiy menyu")],
-        ],
-        resize_keyboard=True
+
+async def sozlamalar_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["🌐 Tilni o'zgartirish"],
+        ["➕ Material qo'shish"],
+        ["📦 Materiallar ro'yxati"],
+        ["✏️ Materialni tahrirlash"],
+        ["🗑️ Materialni o'chirish"],
+        ["📋 Qolip formulasi"],
+        ["⚠️ Minimum chegara"],
+        ["🔔 Avtomatik hisobot vaqti"],
+        ["🗑️ Barcha ma'lumotlarni tozalash"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+async def _faqat_superadmin(message: Message) -> bool:
+    """Sozlamalar bo'limi faqat superadmin uchun."""
+    user = await db.get_user(message.from_user.id)
+    if not user or user["rol"] != "superadmin":
+        await say(message, "❌ Ruxsat yo'q! Bu bo'lim faqat Super Admin uchun.")
+        return False
+    return True
+
+
+@router.message(Tkey("⚙️ Sozlamalar"))
+async def sozlamalar(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    await say(
+        message,
+        "⚙️ Sozlamalar bo'limi:",
+        reply_markup=await sozlamalar_menu(message.from_user.id)
     )
 
-@router.message(F.text == "⚙️ Sozlamalar")
-async def sozlamalar(message: Message):
-    await message.answer(
-        "⚙️ Sozlamalar bo'limi:",
-        reply_markup=sozlamalar_menu()
-    )
 
 # ── Material qo'shish ──
-@router.message(F.text == "➕ Material qo'shish")
+@router.message(Tkey("➕ Material qo'shish"))
 async def material_qoshish(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     await state.clear()
     await state.set_state(MaterialState.nomi)
-    await message.answer(
-        "Material nomini kiriting:\nMisol: Sement"
-    )
+    await say(message, "Material nomini kiriting:\nMisol: Sement")
+
 
 @router.message(MaterialState.nomi)
 async def material_nomi(message: Message, state: FSMContext):
     await state.update_data(nomi=message.text.strip())
     await state.set_state(MaterialState.qoldiq)
-    await message.answer(
-        "Hozir omborda qancha bor?\nMisol: 30"
-    )
+    await say(message, "Hozir omborda qancha bor?\nMisol: 30")
+
 
 @router.message(MaterialState.qoldiq)
 async def material_qoldiq(message: Message, state: FSMContext):
@@ -80,12 +102,14 @@ async def material_qoldiq(message: Message, state: FSMContext):
             raise ValueError
         await state.update_data(qoldiq=qoldiq)
         await state.set_state(MaterialState.birlik)
-        await message.answer(
+        await say(
+            message,
             "Birligini kiriting:\n"
             "Misol: tonna, kg, g, litr, ml, meshok"
         )
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 30")
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 30")
+
 
 @router.message(MaterialState.birlik)
 async def material_birlik(message: Message, state: FSMContext):
@@ -103,47 +127,57 @@ async def material_birlik(message: Message, state: FSMContext):
             f"{data['nomi']}: {data['qoldiq']} {birlik}"
         )
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"✅ {data['nomi']} qo'shildi!\n"
             f"Miqdor: {data['qoldiq']} {birlik}",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
+
 # ── Materiallar ro'yxati ──
-@router.message(F.text == "📦 Materiallar ro'yxati")
+@router.message(Tkey("📦 Materiallar ro'yxati"))
 async def materiallar_royxati(message: Message):
+    if not await _faqat_superadmin(message):
+        return
     try:
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Hali material kiritilmagan!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
             return
         text = "📦 Materiallar:\n\n"
         for m in materials:
             qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
             text += f"🔹 {m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
-        await message.answer(text, reply_markup=sozlamalar_menu())
+        await say(message, text, reply_markup=await sozlamalar_menu(message.from_user.id))
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
+
 
 # ── Materialni tahrirlash ──
-@router.message(F.text == "✏️ Materialni tahrirlash")
+@router.message(Tkey("✏️ Materialni tahrirlash"))
 async def material_tahrirlash(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     try:
         await state.clear()
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Hali material kiritilmagan!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
             return
         text = "✏️ Qaysi materialni tahrirlash?\nRaqamini kiriting:\n\n"
@@ -152,9 +186,10 @@ async def material_tahrirlash(message: Message, state: FSMContext):
             text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
         await state.update_data(materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials])
         await state.set_state(MaterialEditState.material_id)
-        await message.answer(text)
+        await say(message, text)
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
+
 
 @router.message(MaterialEditState.material_id)
 async def material_tahrirlash_id(message: Message, state: FSMContext):
@@ -164,25 +199,28 @@ async def material_tahrirlash_id(message: Message, state: FSMContext):
         materials = data["materials"]
         material = next((m for m in materials if m[0] == material_id), None)
         if not material:
-            await message.answer("❌ Bunday raqam yo'q! Qaytadan kiriting.")
+            await say(message, "❌ Bunday raqam yo'q! Qaytadan kiriting.")
             return
         await state.update_data(
             material_id=material_id,
             eski_nomi=material[1]
         )
         await state.set_state(MaterialEditState.nomi)
-        await message.answer(
+        await say(
+            message,
             f"Yangi nom kiriting:\n"
             f"(Hozirgi: {material[1]})"
         )
     except ValueError:
-        await message.answer("❌ Faqat raqam kiriting!")
+        await say(message, "❌ Faqat raqam kiriting!")
+
 
 @router.message(MaterialEditState.nomi)
 async def material_tahrirlash_nomi(message: Message, state: FSMContext):
     await state.update_data(nomi=message.text.strip())
     await state.set_state(MaterialEditState.qoldiq)
-    await message.answer("Yangi qoldiq miqdorini kiriting:\nMisol: 25")
+    await say(message, "Yangi qoldiq miqdorini kiriting:\nMisol: 25")
+
 
 @router.message(MaterialEditState.qoldiq)
 async def material_tahrirlash_qoldiq(message: Message, state: FSMContext):
@@ -192,11 +230,10 @@ async def material_tahrirlash_qoldiq(message: Message, state: FSMContext):
             raise ValueError
         await state.update_data(qoldiq=qoldiq)
         await state.set_state(MaterialEditState.birlik)
-        await message.answer(
-            "Yangi birlikni kiriting:\nMisol: tonna, kg, litr"
-        )
+        await say(message, "Yangi birlikni kiriting:\nMisol: tonna, kg, litr")
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting!")
+        await say(message, "❌ Faqat musbat son kiriting!")
+
 
 @router.message(MaterialEditState.birlik)
 async def material_tahrirlash_birlik(message: Message, state: FSMContext):
@@ -218,28 +255,34 @@ async def material_tahrirlash_birlik(message: Message, state: FSMContext):
             f"{data['eski_nomi']} → {data['nomi']}: {data['qoldiq']} {birlik}"
         )
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"✅ Material yangilandi!\n"
             f"{data['nomi']} — {data['qoldiq']} {birlik}",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
+
 # ── Materialni o'chirish ──
-@router.message(F.text == "🗑️ Materialni o'chirish")
+@router.message(Tkey("🗑️ Materialni o'chirish"))
 async def material_ochirish(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     try:
         await state.clear()
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Hali material kiritilmagan!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
             return
         text = "🗑️ Qaysi materialni o'chirish?\nRaqamini kiriting:\n\n"
@@ -250,9 +293,10 @@ async def material_ochirish(message: Message, state: FSMContext):
             materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials]
         )
         await state.set_state(MaterialDeleteState.material_id)
-        await message.answer(text)
+        await say(message, text)
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
+
 
 @router.message(MaterialDeleteState.material_id)
 async def material_ochirish_id(message: Message, state: FSMContext):
@@ -262,7 +306,7 @@ async def material_ochirish_id(message: Message, state: FSMContext):
         materials = data["materials"]
         material = next((m for m in materials if m[0] == material_id), None)
         if not material:
-            await message.answer("❌ Bunday raqam yo'q!")
+            await say(message, "❌ Bunday raqam yo'q!")
             await state.clear()
             return
         await db.delete_material(material_id)
@@ -275,34 +319,37 @@ async def material_ochirish_id(message: Message, state: FSMContext):
             f"{material[1]} o'chirildi"
         )
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"✅ {material[1]} o'chirildi!",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
     except ValueError:
-        await message.answer("❌ Faqat raqam kiriting!")
+        await say(message, "❌ Faqat raqam kiriting!")
         await state.clear()
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
+
 # ── Qolip formulasi ──
-@router.message(F.text == "📋 Qolip formulasi")
+@router.message(Tkey("📋 Qolip formulasi"))
 async def qolip_formulasi(message: Message):
+    if not await _faqat_superadmin(message):
+        return
     try:
         formula = await db.get_qolip_formula()
-        keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="✏️ Formulani yangilash")],
-                [KeyboardButton(text="🏠 Asosiy menyu")],
-            ],
-            resize_keyboard=True
-        )
+        keyboard = await build_keyboard(message.from_user.id, [
+            ["✏️ Formulani yangilash"],
+            ["🏠 Asosiy menyu"],
+        ])
         if not formula:
-            await message.answer(
+            await say(
+                message,
                 "❌ Formula kiritilmagan!\n"
                 "✏️ Formulani yangilash tugmasini bosing.",
                 reply_markup=keyboard
@@ -311,19 +358,23 @@ async def qolip_formulasi(message: Message):
         text = "📋 1 qolipga ketadigan materiallar:\n\n"
         for f in formula:
             text += f"🔹 {f[0]}: {f[1]} {f[2]}\n"
-        await message.answer(text, reply_markup=keyboard)
+        await say(message, text, reply_markup=keyboard)
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
 
-@router.message(F.text == "✏️ Formulani yangilash")
+
+@router.message(Tkey("✏️ Formulani yangilash"))
 async def formula_yangilash(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     try:
         await state.clear()
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Avval material qo'shing!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
             return
         await db.clear_qolip_formula()
@@ -333,14 +384,16 @@ async def formula_yangilash(message: Message, state: FSMContext):
         )
         await state.set_state(FormulaState.miqdor)
         m = materials[0]
-        await message.answer(
+        await say(
+            message,
             f"1 qolipga {m[1]} dan qancha ketadi?\n"
             f"(Ombordagi birlik: {m[4]})\n"
             f"Misol: 110"
         )
     except Exception as e:
         await state.clear()
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
+
 
 @router.message(FormulaState.miqdor)
 async def formula_miqdor(message: Message, state: FSMContext):
@@ -354,13 +407,15 @@ async def formula_miqdor(message: Message, state: FSMContext):
         materials = data["materials"]
         index = data["index"]
         m = materials[index]
-        await message.answer(
+        await say(
+            message,
             f"{m[1]} uchun birlikni kiriting:\n"
             f"Misol: kg, g, litr, ml\n"
             f"(Omborda: {m[4]})"
         )
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting! Misol: 110")
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 110")
+
 
 @router.message(FormulaState.birlik)
 async def formula_birlik(message: Message, state: FSMContext):
@@ -377,7 +432,8 @@ async def formula_birlik(message: Message, state: FSMContext):
             await state.update_data(index=index)
             await state.set_state(FormulaState.miqdor)
             next_m = materials[index]
-            await message.answer(
+            await say(
+                message,
                 f"1 qolipga {next_m[1]} dan qancha ketadi?\n"
                 f"(Ombordagi birlik: {next_m[4]})\n"
                 f"Misol: 50"
@@ -392,27 +448,33 @@ async def formula_birlik(message: Message, state: FSMContext):
                 f"{len(materials)} ta material formulasi saqlandi"
             )
             await state.clear()
-            await message.answer(
+            await say(
+                message,
                 "✅ Formula saqlandi!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
     except Exception as e:
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"❌ Xatolik: {str(e)}",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
 
+
 # ── Minimum chegara ──
-@router.message(F.text == "⚠️ Minimum chegara")
+@router.message(Tkey("⚠️ Minimum chegara"))
 async def min_chegara(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     try:
         await state.clear()
         materials = await db.get_materials()
         if not materials:
-            await message.answer(
+            await say(
+                message,
                 "❌ Avval material qo'shing!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
             return
         await state.update_data(
@@ -421,14 +483,16 @@ async def min_chegara(message: Message, state: FSMContext):
         )
         await state.set_state(MinChegaraState.miqdor)
         m = materials[0]
-        await message.answer(
+        await say(
+            message,
             f"{m[1]} uchun minimum chegara qancha?\n"
             f"(Birlik: {m[4]})\n"
             f"0 kiriting — chegara o'chiriladi\n"
             f"Misol: 5"
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
+
 
 @router.message(MinChegaraState.miqdor)
 async def min_chegara_miqdor(message: Message, state: FSMContext):
@@ -447,7 +511,8 @@ async def min_chegara_miqdor(message: Message, state: FSMContext):
         if index < len(materials):
             await state.update_data(index=index)
             next_m = materials[index]
-            await message.answer(
+            await say(
+                message,
                 f"{next_m[1]} uchun minimum chegara qancha?\n"
                 f"(Birlik: {next_m[4]})\n"
                 f"0 kiriting — chegara o'chiriladi\n"
@@ -455,22 +520,27 @@ async def min_chegara_miqdor(message: Message, state: FSMContext):
             )
         else:
             await state.clear()
-            await message.answer(
+            await say(
+                message,
                 "✅ Minimum chegaralar saqlandi!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
     except ValueError:
-        await message.answer("❌ Faqat musbat son kiriting!")
+        await say(message, "❌ Faqat musbat son kiriting!")
+
 
 # ── Avtomatik hisobot ──
-@router.message(F.text == "🔔 Avtomatik hisobot vaqti")
+@router.message(Tkey("🔔 Avtomatik hisobot vaqti"))
 async def avto_hisobot(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     try:
         await state.clear()
         joriy = await db.get_bot_setting("hisobot_vaqti")
         joriy_text = f"Hozirgi vaqt: {joriy}" if joriy else "Hali belgilanmagan"
         await state.set_state(AutoHisobotState.vaqt)
-        await message.answer(
+        await say(
+            message,
             f"🔔 Avtomatik hisobot vaqtini kiriting:\n"
             f"{joriy_text}\n\n"
             f"Format: HH:MM\n"
@@ -478,7 +548,8 @@ async def avto_hisobot(message: Message, state: FSMContext):
             f"O'chirish uchun: 0"
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
+
 
 @router.message(AutoHisobotState.vaqt)
 async def avto_hisobot_saqlash(message: Message, state: FSMContext):
@@ -487,9 +558,10 @@ async def avto_hisobot_saqlash(message: Message, state: FSMContext):
         if text == "0":
             await db.set_bot_setting("hisobot_vaqti", "")
             await state.clear()
-            await message.answer(
+            await say(
+                message,
                 "✅ Avtomatik hisobot o'chirildi!",
-                reply_markup=sozlamalar_menu()
+                reply_markup=await sozlamalar_menu(message.from_user.id)
             )
             return
         parts = text.split(":")
@@ -502,29 +574,32 @@ async def avto_hisobot_saqlash(message: Message, state: FSMContext):
         vaqt = f"{soat:02d}:{daqiqa:02d}"
         await db.set_bot_setting("hisobot_vaqti", vaqt)
         await state.clear()
-        await message.answer(
+        await say(
+            message,
             f"✅ Avtomatik hisobot belgilandi!\n"
             f"⏰ Har kuni soat {vaqt} da hisobot keladi.",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
     except ValueError:
-        await message.answer(
+        await say(
+            message,
             "❌ Noto'g'ri format!\n"
             "To'g'ri: 21:00 yoki 08:30"
         )
 
+
 # ── Barcha ma'lumotlarni tozalash ──
-@router.message(F.text == "🗑️ Barcha ma'lumotlarni tozalash")
+@router.message(Tkey("🗑️ Barcha ma'lumotlarni tozalash"))
 async def barchani_tozalash(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
     await state.clear()
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Ha, tozalash")],
-            [KeyboardButton(text="❌ Yo'q, bekor qilish")],
-        ],
-        resize_keyboard=True
-    )
-    await message.answer(
+    keyboard = await build_keyboard(message.from_user.id, [
+        ["✅ Ha, tozalash"],
+        ["❌ Yo'q, bekor qilish"],
+    ])
+    await say(
+        message,
         "⚠️ DIQQAT!\n\n"
         "Barcha materiallar, formula, ishlab chiqarish "
         "va sotuv ma'lumotlari o'chib ketadi!\n\n"
@@ -532,12 +607,13 @@ async def barchani_tozalash(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
 
-@router.message(F.text == "✅ Ha, tozalash")
+
+@router.message(Tkey("✅ Ha, tozalash"))
 async def barchani_tozalash_ha(message: Message):
     try:
         user = await db.get_user(message.from_user.id)
         if not user or user["rol"] != "superadmin":
-            await message.answer("❌ Faqat Super Admin tozalashi mumkin!")
+            await say(message, "❌ Faqat Super Admin tozalashi mumkin!")
             return
         await db.clear_all_data()
         await db.add_audit_log(
@@ -547,29 +623,31 @@ async def barchani_tozalash_ha(message: Message):
             "Barcha ma'lumotlar tozalandi",
             "To'liq tizim tozalash"
         )
-        await message.answer(
+        await say(
+            message,
             "✅ Barcha ma'lumotlar tozalandi!",
-            reply_markup=sozlamalar_menu()
+            reply_markup=await sozlamalar_menu(message.from_user.id)
         )
     except Exception as e:
-        await message.answer(f"❌ Xatolik: {str(e)}")
+        await say(message, f"❌ Xatolik: {str(e)}")
 
-@router.message(F.text == "❌ Yo'q, bekor qilish")
+
+@router.message(Tkey("❌ Yo'q, bekor qilish"))
 async def barchani_tozalash_yoq(message: Message):
-    await message.answer(
+    await say(
+        message,
         "❌ Bekor qilindi!",
-        reply_markup=sozlamalar_menu()
+        reply_markup=await sozlamalar_menu(message.from_user.id)
     )
-
 
 
 # ── Til o'zgartirish ──
 def til_tanlash_keyboard():
-    """Til tanlash uchun InlineKeyboard"""
+    """Til tanlash uchun InlineKeyboard (sozlamalar uchun — slang_ prefiksi)."""
     keyboard = []
     row = []
-    for i, (til_kod, til_nomi) in enumerate(TIL_NOMLARI.items()):
-        row.append(InlineKeyboardButton(text=til_nomi, callback_data=f"til_{til_kod}"))
+    for til_kod, til_nomi in TIL_NOMLARI.items():
+        row.append(InlineKeyboardButton(text=til_nomi, callback_data=f"slang_{til_kod}"))
         if len(row) == 2:  # 2 ta tugma bir qatorda
             keyboard.append(row)
             row = []
@@ -577,33 +655,37 @@ def til_tanlash_keyboard():
         keyboard.append(row)
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-@router.message(F.text == "🌐 Tilni o'zgartirish")
+
+@router.message(Tkey("🌐 Tilni o'zgartirish"))
 async def til_ozgartirish(message: Message):
     user = await db.get_user(message.from_user.id)
     hozirgi_til = user.get("til", "uz") if user else "uz"
     til_nomi = TIL_NOMLARI.get(hozirgi_til, "🇺🇿 O'zbek")
-    
-    await message.answer(
+
+    await say(
+        message,
         f"🌐 Hozirgi til: {til_nomi}\n\n"
         f"Yangi tilni tanlang:",
         reply_markup=til_tanlash_keyboard()
     )
 
-@router.callback_query(lambda c: c.data.startswith("til_") and c.data != "til_tanlash")
+
+@router.callback_query(lambda c: c.data and c.data.startswith("slang_"))
 async def til_ozgartirish_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     til_kod = callback.data.split("_", 1)[1]
-    
+
     # Tilni saqlash
     await db.update_user_til(user_id, til_kod)
-    
+    invalidate_til_cache(user_id)
+
     # Tasdiqlash (yangi tilda)
-    from translation import t
     xabar = await t("✅ Til o'zgartirildi!", user_id)
-    
+
     await callback.message.edit_text(xabar)
+    sozlamalar_matn = await t("⚙️ Sozlamalar:", user_id)
     await callback.message.answer(
-        "⚙️ Sozlamalar:",
-        reply_markup=sozlamalar_menu()
+        sozlamalar_matn,
+        reply_markup=await sozlamalar_menu(user_id)
     )
     await callback.answer()
