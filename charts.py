@@ -100,3 +100,21 @@ def finance_bar(labels, rev_vals, profit_vals, valyuta="so'm", sarlavha="Daromad
     except Exception as e:
         logger.warning("finance_bar xato: %r", e)
         return None
+
+
+def text_pdf(title, body):
+    """Matnli hisobotni A4 PDF sahifaga chiqaradi (matplotlib orqali)."""
+    if not MATPLOTLIB:
+        return None
+    try:
+        fig = plt.figure(figsize=(8.27, 11.69))  # A4
+        fig.text(0.06, 0.97, title, fontsize=14, fontweight="bold", va="top")
+        fig.text(0.06, 0.93, body, fontsize=9, va="top", family="monospace", wrap=True)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="pdf")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        logger.warning("text_pdf xato: %r", e)
+        return None

@@ -42,6 +42,11 @@ class AutoHisobotState(StatesGroup):
     vaqt = State()
 
 
+class ObunaState(StatesGroup):
+    qoshish = State()
+    ochirish = State()
+
+
 async def sozlamalar_menu(user_id):
     return await build_keyboard(user_id, [
         ["🌐 Tilni o'zgartirish"],
@@ -52,7 +57,7 @@ async def sozlamalar_menu(user_id):
         ["🗑️ Materialni o'chirish"],
         ["📋 Qolip formulasi"],
         ["⚠️ Minimum chegara"],
-        ["🔔 Avtomatik hisobot vaqti"],
+        ["🔔 Hisobot jadvali"],
         ["🗑️ Barcha ma'lumotlarni tozalash"],
         ["🏠 Asosiy menyu"],
     ])
@@ -554,39 +559,94 @@ async def min_chegara_miqdor(message: Message, state: FSMContext):
         await say(message, "❌ Faqat musbat son kiriting!")
 
 
-# ── Avtomatik hisobot ──
-@router.message(Tkey("🔔 Avtomatik hisobot vaqti"))
-async def avto_hisobot(message: Message, state: FSMContext):
+# ── Hisobot jadvali (avtomatik hisobot) ──
+async def hisobot_jadvali_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["🕐 Kunlik vaqt"],
+        ["📅 Haftalik vaqt"],
+        ["🗓 Oylik vaqt"],
+        ["📨 Obunachilar"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+async def obuna_menu(user_id):
+    return await build_keyboard(user_id, [
+        ["➕ Meni qo'shish"],
+        ["➖ Meni o'chirish"],
+        ["➕ ID qo'shish"],
+        ["➖ ID o'chirish"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+@router.message(Tkey("🔔 Hisobot jadvali"))
+async def hisobot_jadvali(message: Message):
     if not await _faqat_superadmin(message):
         return
-    try:
-        await state.clear()
-        joriy = await db.get_bot_setting("hisobot_vaqti")
-        joriy_text = f"Hozirgi vaqt: {joriy}" if joriy else "Hali belgilanmagan"
-        await state.set_state(AutoHisobotState.vaqt)
-        await say(
-            message,
-            f"🔔 Avtomatik hisobot vaqtini kiriting:\n"
-            f"{joriy_text}\n\n"
-            f"Format: HH:MM\n"
-            f"Misol: 21:00\n\n"
-            f"O'chirish uchun: 0"
-        )
-    except Exception as e:
-        await say_error(message, e)
+    kunlik = await db.get_bot_setting("hisobot_vaqti")
+    haftalik = await db.get_bot_setting("hisobot_haftalik")
+    oylik = await db.get_bot_setting("hisobot_oylik")
+    obuna = len(await db.get_hisobot_obunachilar())
+    await say(
+        message,
+        f"🔔 Hisobot jadvali:\n"
+        f"🕐 Kunlik: {kunlik or '—'}\n"
+        f"📅 Haftalik (dushanba): {haftalik or '—'}\n"
+        f"🗓 Oylik (1-kun): {oylik or '—'}\n"
+        f"📨 Qo'shimcha obunachilar: {obuna} ta\n\n"
+        f"O'zgartirish uchun tanlang:",
+        reply_markup=await hisobot_jadvali_menu(message.from_user.id)
+    )
+
+
+async def _vaqt_sorov(message, state, kalit, nomi):
+    joriy = await db.get_bot_setting(kalit)
+    joriy_text = f"Hozirgi: {joriy}" if joriy else "Belgilanmagan"
+    await state.clear()
+    await state.update_data(kalit=kalit, nomi=nomi)
+    await state.set_state(AutoHisobotState.vaqt)
+    await say(
+        message,
+        f"🔔 {nomi} vaqtini kiriting:\n{joriy_text}\n\n"
+        f"Format: HH:MM (masalan 21:00)\nO'chirish uchun: 0"
+    )
+
+
+@router.message(Tkey("🕐 Kunlik vaqt"))
+async def kunlik_vaqt(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
+    await _vaqt_sorov(message, state, "hisobot_vaqti", "Kunlik hisobot")
+
+
+@router.message(Tkey("📅 Haftalik vaqt"))
+async def haftalik_vaqt(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
+    await _vaqt_sorov(message, state, "hisobot_haftalik", "Haftalik hisobot (dushanba)")
+
+
+@router.message(Tkey("🗓 Oylik vaqt"))
+async def oylik_vaqt(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
+    await _vaqt_sorov(message, state, "hisobot_oylik", "Oylik hisobot (1-kun)")
 
 
 @router.message(AutoHisobotState.vaqt)
-async def avto_hisobot_saqlash(message: Message, state: FSMContext):
+async def vaqt_saqlash(message: Message, state: FSMContext):
+    data = await state.get_data()
+    kalit = data.get("kalit", "hisobot_vaqti")
+    nomi = data.get("nomi", "Hisobot")
     try:
         text = message.text.strip()
         if text == "0":
-            await db.set_bot_setting("hisobot_vaqti", "")
+            await db.set_bot_setting(kalit, "")
             await state.clear()
             await say(
-                message,
-                "✅ Avtomatik hisobot o'chirildi!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
+                message, f"✅ {nomi} o'chirildi!",
+                reply_markup=await hisobot_jadvali_menu(message.from_user.id)
             )
             return
         parts = text.split(":")
@@ -597,20 +657,94 @@ async def avto_hisobot_saqlash(message: Message, state: FSMContext):
         if not (0 <= soat <= 23 and 0 <= daqiqa <= 59):
             raise ValueError
         vaqt = f"{soat:02d}:{daqiqa:02d}"
-        await db.set_bot_setting("hisobot_vaqti", vaqt)
+        await db.set_bot_setting(kalit, vaqt)
         await state.clear()
         await say(
             message,
-            f"✅ Avtomatik hisobot belgilandi!\n"
-            f"⏰ Har kuni soat {vaqt} da hisobot keladi.",
-            reply_markup=await sozlamalar_menu(message.from_user.id)
+            f"✅ {nomi} belgilandi!\n⏰ Soat {vaqt} da yuboriladi.",
+            reply_markup=await hisobot_jadvali_menu(message.from_user.id)
         )
     except ValueError:
-        await say(
-            message,
-            "❌ Noto'g'ri format!\n"
-            "To'g'ri: 21:00 yoki 08:30"
-        )
+        await say(message, "❌ Noto'g'ri format!\nTo'g'ri: 21:00 yoki 08:30")
+
+
+# ── Obunachilar ──
+@router.message(Tkey("📨 Obunachilar"))
+async def obunachilar(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    ids = await db.get_hisobot_obunachilar()
+    users = await db.get_all_users()
+    umap = {u["id"]: u["ism"] for u in users}
+    text = "📨 Qo'shimcha obunachilar:\n\n"
+    if ids:
+        for uid in ids:
+            text += f"  • {umap.get(uid, 'Noma`lum')} (<code>{uid}</code>)\n"
+    else:
+        text += "  (bo'sh)\n"
+    text += "\nℹ️ Admin doim hisobot oladi."
+    await say(message, text, parse_mode="HTML",
+              reply_markup=await obuna_menu(message.from_user.id))
+
+
+@router.message(Tkey("➕ Meni qo'shish"))
+async def meni_qoshish(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    await db.add_hisobot_obunachi(message.from_user.id)
+    await say(message, "✅ Siz obunachilar ro'yxatiga qo'shildingiz!",
+              reply_markup=await obuna_menu(message.from_user.id))
+
+
+@router.message(Tkey("➖ Meni o'chirish"))
+async def meni_ochirish(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    await db.remove_hisobot_obunachi(message.from_user.id)
+    await say(message, "✅ Siz ro'yxatdan o'chirildingiz!",
+              reply_markup=await obuna_menu(message.from_user.id))
+
+
+@router.message(Tkey("➕ ID qo'shish"))
+async def id_qoshish(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
+    await state.clear()
+    await state.set_state(ObunaState.qoshish)
+    await say(message, "Qo'shiladigan foydalanuvchi ID sini kiriting:")
+
+
+@router.message(ObunaState.qoshish)
+async def id_qoshish_saqlash(message: Message, state: FSMContext):
+    try:
+        uid = int(message.text.strip())
+        await db.add_hisobot_obunachi(uid)
+        await state.clear()
+        await say(message, f"✅ {uid} qo'shildi!",
+                  reply_markup=await obuna_menu(message.from_user.id))
+    except ValueError:
+        await say(message, "❌ Faqat raqam kiriting!")
+
+
+@router.message(Tkey("➖ ID o'chirish"))
+async def id_ochirish(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
+    await state.clear()
+    await state.set_state(ObunaState.ochirish)
+    await say(message, "O'chiriladigan foydalanuvchi ID sini kiriting:")
+
+
+@router.message(ObunaState.ochirish)
+async def id_ochirish_saqlash(message: Message, state: FSMContext):
+    try:
+        uid = int(message.text.strip())
+        await db.remove_hisobot_obunachi(uid)
+        await state.clear()
+        await say(message, f"✅ {uid} o'chirildi!",
+                  reply_markup=await obuna_menu(message.from_user.id))
+    except ValueError:
+        await say(message, "❌ Faqat raqam kiriting!")
 
 
 # ── Barcha ma'lumotlarni tozalash ──

@@ -103,10 +103,13 @@ class PermissionMiddleware(BaseMiddleware):
         "📊 Umumiy hisobot": "hisobot_korish",
         "📊 Tafsilotli hisobot": "hisobot_korish",
         "👷 Ishchilar hisoboti": "hisobot_korish",
+        "🧱 Material sarfi": "hisobot_korish",
         "💰 Moliya hisoboti": "hisobot_korish",
         "📈 Taqqoslash": "hisobot_korish",
         "📉 Grafiklar": "hisobot_korish",
         "📥 Excel hisobot": "excel_hisobot",
+        "📄 CSV eksport": "excel_hisobot",
+        "📄 PDF eksport": "excel_hisobot",
         "📋 Inventarizatsiya": "tayyor_mahsulot_tahrirlash",
     }
 
@@ -364,24 +367,62 @@ async def global_error_handler(event: ErrorEvent):
 
 
 # ── Scheduler ──
+def _vaqt_mos(vaqt_str, joriy_minut):
+    """'HH:MM' joriy daqiqaga (kun ichidagi minut) mosmi."""
+    try:
+        soat, daqiqa = vaqt_str.split(":")
+        return int(soat) * 60 + int(daqiqa) == joriy_minut
+    except Exception:
+        return False
+
+
+async def _hisobot_qabul_qiluvchilar():
+    """Admin + obunachilar (takrorsiz user_id ro'yxati)."""
+    qabul = set()
+    admin_id = await db.get_bot_setting("admin_chat_id")
+    if admin_id:
+        try:
+            qabul.add(int(admin_id))
+        except (TypeError, ValueError):
+            pass
+    for uid in await db.get_hisobot_obunachilar():
+        qabul.add(uid)
+    return qabul
+
+
+async def _hammaga_yubor(turi):
+    for chat_id in await _hisobot_qabul_qiluvchilar():
+        try:
+            await reports.avtomatik_hisobot(bot, chat_id, turi)
+        except Exception as e:
+            log_exc(f"avto_hisobot_{turi}", e)
+
+
 async def hisobot_scheduler():
-    last_sent_minute = -1
+    yuborilgan = {}  # {turi: 'YYYY-MM-DD'} — kuniga bir marta
     while True:
         try:
-            # GMT+5 (Toshkent) vaqtini ishlatamiz
             hozir = db.hozirgi_vaqt()
-            vaqt = await db.get_bot_setting("hisobot_vaqti")
-            if vaqt:
-                parts = vaqt.split(":")
-                soat = int(parts[0])
-                daqiqa = int(parts[1])
-                joriy_minut = hozir.hour * 60 + hozir.minute
-                kerakli_minut = soat * 60 + daqiqa
-                if joriy_minut == kerakli_minut and last_sent_minute != joriy_minut:
-                    chat_id = await db.get_bot_setting("admin_chat_id")
-                    if chat_id:
-                        await reports.avtomatik_hisobot(bot, int(chat_id))
-                    last_sent_minute = joriy_minut
+            joriy_minut = hozir.hour * 60 + hozir.minute
+            kun = hozir.date().isoformat()
+
+            kunlik = await db.get_bot_setting("hisobot_vaqti")
+            haftalik = await db.get_bot_setting("hisobot_haftalik")
+            oylik = await db.get_bot_setting("hisobot_oylik")
+
+            if kunlik and _vaqt_mos(kunlik, joriy_minut) and yuborilgan.get("kun") != kun:
+                await _hammaga_yubor("kun")
+                yuborilgan["kun"] = kun
+            # Haftalik — dushanba (weekday()==0)
+            if (haftalik and hozir.weekday() == 0
+                    and _vaqt_mos(haftalik, joriy_minut) and yuborilgan.get("hafta") != kun):
+                await _hammaga_yubor("hafta")
+                yuborilgan["hafta"] = kun
+            # Oylik — oyning 1-kuni
+            if (oylik and hozir.day == 1
+                    and _vaqt_mos(oylik, joriy_minut) and yuborilgan.get("oy") != kun):
+                await _hammaga_yubor("oy")
+                yuborilgan["oy"] = kun
         except Exception as e:
             log_exc("scheduler", e)
         await asyncio.sleep(30)

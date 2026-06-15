@@ -373,6 +373,13 @@ async def init_db():
                 vaqt_epoch DOUBLE PRECISION NOT NULL
             )
         """)
+        # Avtomatik hisobot obunachilari
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hisobot_obunachilar (
+                user_id BIGINT PRIMARY KEY,
+                vaqt TIMESTAMP DEFAULT NOW()
+            )
+        """)
 
 # ── Permissions ──
 async def get_user_permissions(user_id, rol):
@@ -1363,3 +1370,58 @@ async def get_sales_daily(boshliq, oxiri):
         d["qty"] += int(r["qty"])
         d["rev"] += float(r["rev"])
     return [agg[k] for k in sorted(agg.keys())]
+
+
+
+# ── Hisobot obunachilari (avtomatik hisobot qabul qiluvchilar) ──
+async def add_hisobot_obunachi(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO hisobot_obunachilar (user_id) VALUES ($1) "
+            "ON CONFLICT (user_id) DO NOTHING", user_id
+        )
+
+
+async def remove_hisobot_obunachi(user_id):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM hisobot_obunachilar WHERE user_id=$1", user_id
+        )
+
+
+async def get_hisobot_obunachilar():
+    """Obunachilar user_id ro'yxati."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id FROM hisobot_obunachilar")
+        return [r["user_id"] for r in rows]
+
+
+
+# ── Material sarfi (davr bo'yicha, narx bilan) ──
+async def get_material_sarfi(boshliq, oxiri):
+    """Davr bo'yicha har bir material sarfi:
+    [{material_id, nomi, birlik, jami(asosiy), narx(asosiy_uzs)}] (jami bo'yicha)."""
+    boshliq_str = boshliq.isoformat() if hasattr(boshliq, 'isoformat') else str(boshliq)
+    oxiri_str = oxiri.isoformat() if hasattr(oxiri, 'isoformat') else str(oxiri)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT cl.material_id, cl.material_nomi, cl.birlik,
+                   COALESCE(SUM(cl.ketgan_miqdor), 0) AS jami,
+                   COALESCE(m.narx, 0) AS narx
+            FROM material_chiqim_log cl
+            LEFT JOIN materials m ON cl.material_id = m.id
+            WHERE cl.sana BETWEEN $1 AND $2
+            GROUP BY cl.material_id, cl.material_nomi, cl.birlik, m.narx
+            ORDER BY jami DESC
+        """, boshliq_str, oxiri_str)
+        return [{
+            "material_id": r["material_id"],
+            "nomi": r["material_nomi"],
+            "birlik": r["birlik"],
+            "jami": float(r["jami"]),
+            "narx": float(r["narx"] or 0),
+        } for r in rows]

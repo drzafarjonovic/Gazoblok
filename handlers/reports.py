@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import date, timedelta, timezone, datetime
 import io
+import csv
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 import database as db
@@ -47,10 +48,13 @@ async def reports_menu(user_id):
         ["📊 Umumiy hisobot"],
         ["📊 Tafsilotli hisobot"],
         ["👷 Ishchilar hisoboti"],
+        ["🧱 Material sarfi"],
         ["💰 Moliya hisoboti"],
         ["📈 Taqqoslash"],
         ["📉 Grafiklar"],
         ["📥 Excel hisobot"],
+        ["📄 CSV eksport"],
+        ["📄 PDF eksport"],
         ["🏠 Asosiy menyu"],
     ])
 
@@ -370,6 +374,24 @@ async def gen_taqqos(boshliq, oxiri, sarlavha):
     )
 
 
+async def gen_material(boshliq, oxiri, sarlavha):
+    sarf = await db.get_material_sarfi(boshliq, oxiri)
+    if not sarf:
+        return (f"🧱 Material sarfi ({sarlavha})\n"
+                f"📅 {boshliq} — {oxiri}\n\n   Ma'lumot yo'q")
+    text = (f"🧱 Material sarfi ({sarlavha})\n"
+            f"📅 {boshliq} — {oxiri}\n━━━━━━━━━━━━━━━━\n\n")
+    jami_narx = 0.0
+    for s in sarf:
+        disp = db.asosiydan_birlikga(s["jami"], s["birlik"])
+        narx_summa = s["jami"] * s["narx"]
+        jami_narx += narx_summa
+        text += (f"   {s['nomi']}: {disp:.2f} {s['birlik']} "
+                 f"= {await val.format_uzs(narx_summa)}\n")
+    text += f"\n💰 Jami sarf qiymati: {await val.format_uzs(jami_narx)}"
+    return text
+
+
 # ── Excel ──
 async def _excel_yubor(target, user_id, boshliq, oxiri):
     prod_logs = await db.get_production_range(boshliq, oxiri)
@@ -561,6 +583,45 @@ async def _grafik_yubor(target, user_id, boshliq, oxiri):
             await target.answer_photo(BufferedInputFile(png3, "finance.png"), caption=cap)
 
 
+# ── CSV / PDF eksport ──
+async def _csv_yubor(target, user_id, boshliq, oxiri):
+    prod = await db.get_production_daily(boshliq, oxiri)
+    sales = await db.get_sales_daily(boshliq, oxiri)
+    pmap = {d["sana"]: d for d in prod}
+    smap = {d["sana"]: d for d in sales}
+    sanalar = sorted(set(list(pmap.keys()) + list(smap.keys())))
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["Sana", "Qolip", "A ishlab ch.", "B ishlab ch.",
+                "A sotuv", "B sotuv", "Daromad (so'm)"])
+    for s in sanalar:
+        p = pmap.get(s, {})
+        sd = smap.get(s, {})
+        w.writerow([s, p.get("qolip", 0), p.get("A", 0), p.get("B", 0),
+                    sd.get("A", 0), sd.get("B", 0), round(sd.get("rev", 0))])
+    data = ("\ufeff" + out.getvalue()).encode("utf-8")  # BOM — Excel uchun
+    fn = f"gazobot_{boshliq}_{oxiri}.csv"
+    cap = await t("📄 CSV eksport", user_id)
+    await target.answer_document(BufferedInputFile(data, fn), caption=cap)
+
+
+async def _pdf_yubor(target, user_id, boshliq, oxiri):
+    if not charts.MATPLOTLIB:
+        await _yubor(target, user_id,
+                     "❌ PDF moduli mavjud emas (matplotlib o'rnatilmagan).")
+        return
+    umumiy = await hisobot_matni(boshliq, oxiri, "Umumiy hisobot")
+    moliya = await gen_moliya(boshliq, oxiri, "Moliya")
+    body = await t(umumiy + "\n\n" + moliya, user_id)
+    png = charts.text_pdf("Gazoblok hisobot", body)
+    if not png:
+        await _yubor(target, user_id, "❌ PDF yaratilmadi.")
+        return
+    fn = f"gazobot_{boshliq}_{oxiri}.pdf"
+    cap = await t("📄 PDF eksport", user_id)
+    await target.answer_document(BufferedInputFile(png, fn), caption=cap)
+
+
 # ── Umumiy yuborish ──
 async def _yubor(target, user_id, matn):
     tt = await t(matn, user_id)
@@ -577,6 +638,12 @@ async def _generate(target, user_id, rtype, boshliq, oxiri, sarlavha):
         if rtype == "grafik":
             await _grafik_yubor(target, user_id, boshliq, oxiri)
             return
+        if rtype == "csv":
+            await _csv_yubor(target, user_id, boshliq, oxiri)
+            return
+        if rtype == "pdf":
+            await _pdf_yubor(target, user_id, boshliq, oxiri)
+            return
         if rtype == "umumiy":
             matn = await hisobot_matni(boshliq, oxiri, f"📊 {sarlavha}")
         elif rtype == "tafsil":
@@ -585,6 +652,8 @@ async def _generate(target, user_id, rtype, boshliq, oxiri, sarlavha):
             matn = await gen_moliya(boshliq, oxiri, sarlavha)
         elif rtype == "ishchi":
             matn = await gen_ishchi(boshliq, oxiri, sarlavha)
+        elif rtype == "material":
+            matn = await gen_material(boshliq, oxiri, sarlavha)
         elif rtype == "taqqos":
             matn = await gen_taqqos(boshliq, oxiri, sarlavha)
         else:
@@ -601,7 +670,7 @@ async def _ruxsat(user_id, rtype):
         return False
     if user["rol"] == "superadmin":
         return True
-    perm = "excel_hisobot" if rtype == "excel" else "hisobot_korish"
+    perm = "excel_hisobot" if rtype in ("excel", "csv", "pdf") else "hisobot_korish"
     return await db.has_permission(user_id, user["rol"], perm)
 
 
@@ -653,6 +722,21 @@ async def grafik_entry(message: Message):
     await _davr_sorov(message, "grafik")
 
 
+@router.message(Tkey("🧱 Material sarfi"))
+async def material_entry(message: Message):
+    await _davr_sorov(message, "material")
+
+
+@router.message(Tkey("📄 CSV eksport"))
+async def csv_entry(message: Message):
+    await _davr_sorov(message, "csv")
+
+
+@router.message(Tkey("📄 PDF eksport"))
+async def pdf_entry(message: Message):
+    await _davr_sorov(message, "pdf")
+
+
 # ── Davr callback ──
 @router.callback_query(lambda c: c.data and c.data.startswith("rep:"))
 async def rep_callback(callback: CallbackQuery, state: FSMContext):
@@ -701,10 +785,20 @@ async def custom_sana(message: Message, state: FSMContext):
         )
 
 
-async def avtomatik_hisobot(bot, chat_id):
+async def avtomatik_hisobot(bot, chat_id, turi="kun"):
+    """Avtomatik hisobot yuborish. turi: kun | hafta | oy."""
     try:
-        bugun = db.bugungi_sana()
-        text = await hisobot_matni(bugun, bugun, "🔔 Avtomatik kunlik hisobot")
+        if turi == "hafta":
+            b, o, _ = davr_oraligi("ohafta")
+            sarlavha = "🔔 Avtomatik haftalik hisobot"
+        elif turi == "oy":
+            b, o, _ = davr_oraligi("ooy")
+            sarlavha = "🔔 Avtomatik oylik hisobot"
+        else:
+            bugun = db.bugungi_sana()
+            b = o = bugun
+            sarlavha = "🔔 Avtomatik kunlik hisobot"
+        text = await hisobot_matni(b, o, sarlavha)
         text = await t(text, chat_id)
         await bot.send_message(chat_id, text)
     except Exception as e:
