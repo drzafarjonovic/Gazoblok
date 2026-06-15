@@ -389,7 +389,12 @@ async def main():
     )
     await db.init_db()
     asyncio.create_task(hisobot_scheduler())
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        # Toza yopilish: pool va bot sessiyasini yopamiz
+        await db.close_pool()
+        await bot.session.close()
 
 
 if __name__ == "__main__":

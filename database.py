@@ -1,4 +1,5 @@
 import asyncpg
+import asyncio
 import os
 from datetime import datetime, date, timezone, timedelta
 
@@ -145,17 +146,39 @@ STANDART_ROL_PERMISSIONLAR = {
 
 # ── Connection Pool ──
 _pool = None
+_pool_lock = None
+
+
+def _get_pool_lock():
+    global _pool_lock
+    if _pool_lock is None:
+        _pool_lock = asyncio.Lock()
+    return _pool_lock
+
 
 async def get_pool():
     global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(
-            DATABASE_URL,
-            statement_cache_size=0,
-            min_size=2,
-            max_size=10
-        )
+    # Tez yo'l (lock'siz)
+    if _pool is not None:
+        return _pool
+    # Sekin yo'l: bir vaqtda faqat bitta pool yaratilishini kafolatlaymiz
+    async with _get_pool_lock():
+        if _pool is None:
+            _pool = await asyncpg.create_pool(
+                DATABASE_URL,
+                statement_cache_size=0,
+                min_size=2,
+                max_size=10
+            )
     return _pool
+
+
+async def close_pool():
+    """Bot to'xtaganda pool'ni toza yopish."""
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
 # ── Database init ──
 async def init_db():
@@ -312,6 +335,12 @@ async def init_db():
                     VALUES ($1, $2, $3)
                     ON CONFLICT (rol, permission) DO NOTHING
                 """, rol, permission, ruxsat)
+
+        # ── Migratsiya (eski o'rnatishlar uchun, idempotent) ──
+        # `til` ustuni keyinroq qo'shilgan; eski bazalarda bo'lmasligi mumkin
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS til TEXT DEFAULT 'uz'"
+        )
 
 # ── Permissions ──
 async def get_user_permissions(user_id, rol):
