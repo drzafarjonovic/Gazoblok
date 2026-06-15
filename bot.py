@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import os
-from aiogram import Bot, Dispatcher, BaseMiddleware
+from aiogram import Bot, Dispatcher, BaseMiddleware, Router
 from aiogram.types import (
-    Message, TelegramObject,
+    Message, TelegramObject, ErrorEvent,
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
 )
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from dotenv import load_dotenv
 from typing import Callable, Dict, Any, Awaitable
 import database as db
@@ -307,6 +307,55 @@ async def asosiy(message: Message):
         menu = await get_menu(message.from_user.id, user["rol"])
         xabar = await t("🏠 Asosiy menyu:", message.from_user.id)
         await message.answer(xabar, reply_markup=menu)
+
+
+# ── /til — har bir foydalanuvchi o'z tilini o'zgartirishi mumkin ──
+@dp.message(Command("til"))
+async def til_buyrugi(message: Message):
+    user = await db.get_user(message.from_user.id)
+    if not user or not user["faol"]:
+        return
+    hozirgi = TIL_NOMLARI.get(user.get("til") or "uz", "🇺🇿 O'zbek")
+    xabar = await t(f"🌐 Hozirgi til: {hozirgi}\n\nYangi tilni tanlang:", message.from_user.id)
+    await message.answer(xabar, reply_markup=til_tanlash_keyboard())
+
+
+# ── Tushunarsiz xabar uchun fallback (eng oxirgi router) ──
+fallback_router = Router()
+
+
+@fallback_router.message()
+async def fallback(message: Message):
+    """Hech qaysi tugma/holatga mos kelmagan matnlar uchun yordam xabari."""
+    user = await db.get_user(message.from_user.id)
+    if not user or not user["faol"]:
+        return
+    menu = await get_menu(message.from_user.id, user["rol"])
+    xabar = await t(
+        "❓ Tushunmadim. Iltimos, quyidagi menyu tugmalaridan foydalaning.",
+        message.from_user.id
+    )
+    await message.answer(xabar, reply_markup=menu)
+
+
+dp.include_router(fallback_router)
+
+
+# ── Global xato ushlagich (xavfsizlik tarmog'i) ──
+@dp.errors()
+async def global_error_handler(event: ErrorEvent):
+    log_exc("unhandled", event.exception)
+    try:
+        upd = event.update
+        if upd is not None and getattr(upd, "message", None) is not None:
+            xabar = await t(
+                "❌ Xatolik yuz berdi. Birozdan so'ng qayta urinib ko'ring.",
+                upd.message.from_user.id
+            )
+            await upd.message.answer(xabar)
+    except Exception:
+        pass
+    return True
 
 
 # ── Scheduler ──
