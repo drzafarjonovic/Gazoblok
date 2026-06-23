@@ -36,6 +36,9 @@ if not os.getenv("DATABASE_URL"):
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Bot versiyasi
+BOT_VERSION = "2.0.0"
+
 # ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
 _pin_holat = {}
 # PIN inline-keypad holati (xotirada): {user_id: kiritilayotgan_raqamlar}
@@ -426,7 +429,7 @@ async def til_tanlash_callback(callback: CallbackQuery):
         xabar = await t(
             f"👑 Salom, {ism}!\n"
             f"Siz Super Admin sifatida ro'yxatdan o'tdingiz!\n\n"
-            f"🧱 GazoBot — Gazoblok ishlab chiqarish boshqaruvi",
+            f"🏭 ERP Bot v{BOT_VERSION} — ko'p mahsulotli ishlab chiqarish boshqaruvi",
             user_id
         )
         await callback.message.edit_text(xabar)
@@ -475,6 +478,17 @@ async def til_buyrugi(message: Message):
     hozirgi = TIL_NOMLARI.get(user.get("til") or "uz", "🇺🇿 O'zbek")
     xabar = await t(f"🌐 Hozirgi til: {hozirgi}\n\nYangi tilni tanlang:", message.from_user.id)
     await message.answer(xabar, reply_markup=til_tanlash_keyboard())
+
+
+# ── /version ──
+@dp.message(Command("version"))
+async def version_buyrugi(message: Message):
+    user = await db.get_user(message.from_user.id)
+    if not user or not user["faol"]:
+        return
+    await message.answer(
+        await t(f"🤖 Bot versiyasi: v{BOT_VERSION}\n"
+                f"🏭 Ko'p mahsulotli ishlab chiqarish boshqaruvi", message.from_user.id))
 
 
 # ── Tushunarsiz xabar uchun fallback (eng oxirgi router) ──
@@ -582,6 +596,7 @@ async def main():
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
+    logging.getLogger("gazobot").info("ERP Bot v%s ishga tushmoqda...", BOT_VERSION)
     await db.init_db()
     asyncio.create_task(hisobot_scheduler())
     try:
