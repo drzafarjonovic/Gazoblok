@@ -399,71 +399,110 @@ async def matdelok_cb(callback: CallbackQuery):
 #  "🏭 Mahsulot boshqaruvi" bo'limida (fayl oxirida) sozlanadi.)
 
 
-# ── Minimum chegara ──
+# ── Minimum chegara (tanlab tahrirlash — inline) ──
+async def _minch_kb(user_id):
+    materials = await db.get_materials()
+    settings_rows = await db.get_settings()
+    minmap = {s[3]: s[1] for s in settings_rows}
+    kb = []
+    for m in materials:
+        min_base = minmap.get(m[0])
+        if min_base and min_base > 0:
+            asl = db.asosiydan_birlikga(min_base, m[4])
+            belgi = f"{asl:.0f} {m[4]}"
+        else:
+            belgi = "—"
+        kb.append([InlineKeyboardButton(
+            text=f"{m[1]}: {belgi}", callback_data=f"minch:{m[0]}")])
+    kb.append([InlineKeyboardButton(text="✅ Tayyor", callback_data="minch_done")])
+    return InlineKeyboardMarkup(inline_keyboard=kb), materials
+
+
 @router.message(Tkey("⚠️ Minimum chegara"))
 async def min_chegara(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
         return
+    await state.clear()
+    kb, materials = await _minch_kb(message.from_user.id)
+    if not materials:
+        await say(message, "❌ Avval material qo'shing!",
+                  reply_markup=await materiallar_submenu(message.from_user.id))
+        return
+    await say(message,
+              "⚠️ Minimum chegara\nO'zgartirish uchun materialni tanlang:",
+              reply_markup=kb)
+
+
+@router.callback_query(lambda c: c.data == "minch_done")
+async def minch_done(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     try:
-        await state.clear()
-        materials = await db.get_materials()
-        if not materials:
-            await say(
-                message,
-                "❌ Avval material qo'shing!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
-            )
-            return
-        await state.update_data(
-            materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials],
-            index=0
-        )
-        await state.set_state(MinChegaraState.miqdor)
-        m = materials[0]
-        await say(
-            message,
-            f"{m[1]} uchun minimum chegara qancha?\n"
-            f"(Birlik: {m[4]})\n"
-            f"0 kiriting — chegara o'chiriladi\n"
-            f"Misol: 5"
-        )
-    except Exception as e:
-        await say_error(message, e)
+        await callback.message.edit_text(await t("✅ Tayyor.", callback.from_user.id))
+    except Exception:
+        pass
+    await callback.message.answer(
+        await t("📦 Materiallar bo'limi:", callback.from_user.id),
+        reply_markup=await materiallar_submenu(callback.from_user.id))
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "minch_back")
+async def minch_back(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    kb, _ = await _minch_kb(callback.from_user.id)
+    try:
+        await callback.message.edit_text(
+            await t("⚠️ Minimum chegara — materialni tanlang:", callback.from_user.id),
+            reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("minch:"))
+async def minch_cb(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    mid = int(callback.data.split(":", 1)[1])
+    materials = await db.get_materials()
+    m = next((x for x in materials if x[0] == mid), None)
+    if not m:
+        await callback.answer("❌", show_alert=True)
+        return
+    await state.update_data(minch_mid=mid, minch_nomi=m[1], minch_birlik=m[4])
+    await state.set_state(MinChegaraState.miqdor)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="❌ Bekor", callback_data="minch_back")]])
+    try:
+        await callback.message.edit_text(await t(
+            f"⚠️ {m[1]} uchun minimum chegara?\n"
+            f"(Birlik: {m[4]}; 0 = chegara o'chiriladi)\nMisol: 5",
+            callback.from_user.id), reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
 
 
 @router.message(MinChegaraState.miqdor)
 async def min_chegara_miqdor(message: Message, state: FSMContext):
+    data = await state.get_data()
+    if "minch_mid" not in data:
+        await state.clear()
+        return
     try:
         miqdor = float(message.text.replace(",", "."))
         if miqdor < 0:
             raise ValueError
-        data = await state.get_data()
-        materials = data["materials"]
-        index = data["index"]
-        m = materials[index]
-        # Asosiy birlikka o'tkazib saqlaymiz
-        min_asosiy, _ = db.birlikni_asosiyga(miqdor, m[4])
-        await db.set_min_chegara(m[0], min_asosiy)
-        index += 1
-        if index < len(materials):
-            await state.update_data(index=index)
-            next_m = materials[index]
-            await say(
-                message,
-                f"{next_m[1]} uchun minimum chegara qancha?\n"
-                f"(Birlik: {next_m[4]})\n"
-                f"0 kiriting — chegara o'chiriladi\n"
-                f"Misol: 5"
-            )
-        else:
-            await state.clear()
-            await say(
-                message,
-                "✅ Minimum chegaralar saqlandi!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
-            )
-    except ValueError:
-        await say(message, "❌ Faqat musbat son kiriting!")
+    except (ValueError, AttributeError):
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 5")
+        return
+    min_asosiy, _ = db.birlikni_asosiyga(miqdor, data["minch_birlik"])
+    await db.set_min_chegara(data["minch_mid"], min_asosiy)
+    await state.clear()
+    kb, _ = await _minch_kb(message.from_user.id)
+    await say(message,
+              f"✅ {data['minch_nomi']} chegarasi saqlandi.\nYana o'zgartirish uchun tanlang:",
+              reply_markup=kb)
 
 
 # ── Hisobot jadvali (avtomatik hisobot) ──
