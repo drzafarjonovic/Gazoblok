@@ -1,6 +1,6 @@
 # Manufacturing ERP Telegram Bot
 
-**v2.0** — A Telegram-based ERP/MRP system for manufacturing companies. Fully **dynamic and multi-product**: you define your own products, block types, templates, formulas and prices directly inside the bot — nothing is hard-coded.
+**v2.1** — A Telegram-based ERP/MRP system for manufacturing companies. Fully **dynamic and multi-product**: you define your own products, block types, templates, formulas and prices directly inside the bot — nothing is hard-coded. A button-driven UI (no IDs to type) with a built-in guide makes day-to-day use easy.
 
 > v1.x supported a single product (gas concrete blocks). v2.0 generalizes the whole system to any number of products. Existing data is migrated automatically (see [Migration](#migration)).
 
@@ -61,6 +61,11 @@ This bot is a production management platform that helps manufacturers track raw 
 ### Multilingual
 - 7 languages: Uzbek, English, Russian, Arabic, Turkish, Chinese, German
 - Buttons and messages translated per user; translations cached (in-memory + database) with pre-warming
+
+### Usability
+- Button-driven UI — items are picked from inline buttons, no IDs to type; only real numbers/prices are typed
+- Confirmation prompts for destructive actions (delete material/block/template)
+- Grouped Settings menu and a built-in **Guide** section (❓ Qo'llanma) explaining every feature
 
 ## Technology Stack
 

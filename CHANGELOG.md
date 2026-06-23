@@ -1,5 +1,18 @@
 # O'zgarishlar tarixi
 
+## v2.1.0
+
+Qulaylik (UX) yangilanishi — barcha imkoniyatlar saqlangan holda ishlatish ancha qulay qilindi.
+
+### Yangi
+- **📖 Qo'llanma bo'limi** — bot ichida inline navigatsiyali to'liq yo'riqnoma (11 mavzu: boshlash, mahsulot sozlash, ishlab chiqarish, sotuv, ombor, tayyor mahsulot/inventarizatsiya, narx/tannarx, hisobotlar, foydalanuvchilar, PIN, til). Har bir menyuda `❓ Qo'llanma` tugmasi.
+
+### Yaxshilanishlar
+- **ID/raqam yozish yo'qoldi.** Ombor kirimida material va birlik, shuningdek materialni tahrirlash/o'chirish endi inline tugmalardan tanlanadi — faqat haqiqiy son yoziladi.
+- **O'chirishda tasdiqlash.** Material, blok va shablonni o'chirishda «Ha/Yo'q» so'raladi (tasodifan o'chirib yuborishning oldi olinadi).
+- **Sozlamalar menyusi guruhlandi.** 12 ta tekis tugma o'rniga bo'limlar; «Materiallar» alohida ichki menyuda, «⬅️ Sozlamalar» bilan qaytish.
+- Inline oqimlarda «❌ Bekor» tugmasi va alohida ruxsat tekshiruvi.
+
 ## v2.0.0
 
 Bu yirik versiya — bot **bitta mahsulot (gazoblok)** dan **to'liq dinamik ko'p-mahsulotli** ishlab chiqarish boshqaruv tizimiga o'tdi.
