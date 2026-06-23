@@ -18,7 +18,7 @@ from translation import (
 )
 from handlers import (settings, production, sales, warehouse,
                       reports, finished_goods, users, permissions, inventory,
-                      prices)
+                      prices, qollanma)
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
@@ -168,6 +168,7 @@ async def get_menu(user_id, rol):
             ["📋 Inventarizatsiya"],
             ["⚙️ Sozlamalar"],
             ["👥 Foydalanuvchilar"],
+            ["❓ Qo'llanma"],
         ])
 
     perms = await db.get_user_permissions(user_id, rol)
@@ -191,8 +192,7 @@ async def get_menu(user_id, rol):
         tugmalar.add("👥 Foydalanuvchilar")
 
     rows = [[tugma] for tugma in sorted(tugmalar)]
-    if not rows:
-        rows = [["🏠 Asosiy menyu"]]
+    rows.append(["❓ Qo'llanma"])
     return await build_keyboard(user_id, rows)
 
 
@@ -332,6 +332,7 @@ dp.include_router(sales.router)
 dp.include_router(warehouse.router)
 dp.include_router(reports.router)
 dp.include_router(finished_goods.router)
+dp.include_router(qollanma.router)
 
 
 # ── /start ──
