@@ -58,18 +58,25 @@ class PinTimeoutState(StatesGroup):
 
 async def sozlamalar_menu(user_id):
     return await build_keyboard(user_id, [
-        ["🌐 Tilni o'zgartirish"],
+        ["🏭 Mahsulot boshqaruvi"],
+        ["📦 Materiallar"],
         ["💵 Narxlar va valyuta"],
+        ["🔔 Hisobot jadvali"],
+        ["🔒 PIN kod"],
+        ["🌐 Tilni o'zgartirish"],
+        ["🗑️ Barcha ma'lumotlarni tozalash"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+async def materiallar_submenu(user_id):
+    return await build_keyboard(user_id, [
         ["➕ Material qo'shish"],
         ["📦 Materiallar ro'yxati"],
         ["✏️ Materialni tahrirlash"],
         ["🗑️ Materialni o'chirish"],
-        ["🏭 Mahsulot boshqaruvi"],
         ["⚠️ Minimum chegara"],
-        ["🔔 Hisobot jadvali"],
-        ["🔒 PIN kod"],
-        ["🗑️ Barcha ma'lumotlarni tozalash"],
-        ["🏠 Asosiy menyu"],
+        ["⬅️ Sozlamalar"],
     ])
 
 
@@ -94,6 +101,22 @@ async def sozlamalar(message: Message):
         "⚙️ Sozlamalar bo'limi:",
         reply_markup=await sozlamalar_menu(message.from_user.id)
     )
+
+
+@router.message(Tkey("📦 Materiallar"))
+async def materiallar_bolimi(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    await say(message, "📦 Materiallar bo'limi:",
+              reply_markup=await materiallar_submenu(message.from_user.id))
+
+
+@router.message(Tkey("⬅️ Sozlamalar"))
+async def orqaga_sozlamalar(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    await say(message, "⚙️ Sozlamalar bo'limi:",
+              reply_markup=await sozlamalar_menu(message.from_user.id))
 
 
 # ── Material qo'shish ──
