@@ -1157,6 +1157,30 @@ async def clear_qolip_formula(product_id):
         await conn.execute("DELETE FROM qolip_formula WHERE product_id=$1", product_id)
     _invalidate_struct()
 
+async def set_qolip_formula_item(product_id, material_id, miqdor, birlik):
+    """Bitta material uchun formula qiymatini o'rnatadi (upsert)."""
+    miqdor_asosiy, _ = birlikni_asosiyga(miqdor, birlik)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM qolip_formula WHERE product_id=$1 AND material_id=$2",
+                product_id, material_id)
+            await conn.execute(
+                "INSERT INTO qolip_formula (product_id, material_id, miqdor, birlik, miqdor_asosiy) "
+                "VALUES ($1,$2,$3,$4,$5)",
+                product_id, material_id, miqdor, birlik, miqdor_asosiy)
+    _invalidate_struct()
+
+async def remove_qolip_formula_item(product_id, material_id):
+    """Materialni formuladan olib tashlaydi."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM qolip_formula WHERE product_id=$1 AND material_id=$2",
+            product_id, material_id)
+    _invalidate_struct()
+
 async def check_material_yetarli(product_id, jami_qolip):
     formula = await get_qolip_formula(product_id)
     if not formula:

@@ -1214,18 +1214,9 @@ async def mb_callback(callback: CallbackQuery, state: FSMContext):
         if not materials:
             await callback.answer("❌ Avval material qo'shing!", show_alert=True)
             return
-        await db.clear_qolip_formula(aid)
         await state.clear()
-        await state.update_data(
-            pid=aid,
-            materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials],
-            index=0)
-        await state.set_state(FormulaState.miqdor)
-        m = materials[0]
-        await callback.message.answer(await t(
-            f"📋 1 qolipga {m[1]} dan qancha ketadi?\n"
-            f"(Ombordagi birlik: {m[4]})\nMisol: 110\n\n0 = bu material kerak emas",
-            callback.from_user.id))
+        text, kb = await _frm_editor(aid)
+        await callback.message.edit_text(text, reply_markup=kb)
         await callback.answer()
         return
 
@@ -1420,69 +1411,159 @@ async def mb_shb_chiqim(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=kb)
 
 
-# ── Formula (FSM, product-aware) ──
+# ── Formula (tanlab tahrirlash — inline) ──
+_FRM_OGIRLIK = ["kg", "tonna", "meshok", "g"]
+_FRM_HAJM = ["litr", "ml", "m3"]
+
+
+async def _frm_editor(pid):
+    p = await db.get_mahsulot(pid)
+    formula = await db.get_qolip_formula(pid)
+    inframe = {f[5]: (f[1], f[2]) for f in formula}
+    materials = await db.get_materials()
+    text = (f"📋 {p['nomi'] if p else ''} — formula (1 qolipga)\n\n"
+            f"Materialni tanlab miqdor kiriting.\n✅ = formulada bor.")
+    kb = []
+    for m in materials:
+        mid = m[0]
+        if mid in inframe:
+            q, u = inframe[mid]
+            label = f"✅ {m[1]}: {q} {u}"
+        else:
+            label = f"➕ {m[1]}"
+        kb.append([InlineKeyboardButton(text=label, callback_data=f"frm:{pid}:{mid}")])
+    kb.append([InlineKeyboardButton(text="✅ Tayyor", callback_data=f"frm_done:{pid}")])
+    return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def _frm_units_kb(asl_birlik, pid):
+    baza = db.birlik_bazasi(asl_birlik)
+    birliklar = _FRM_OGIRLIK if baza == "kg" else _FRM_HAJM
+    kb, row = [], []
+    for b in birliklar:
+        row.append(InlineKeyboardButton(text=b, callback_data=f"frmunit:{b}"))
+        if len(row) == 2:
+            kb.append(row)
+            row = []
+    if row:
+        kb.append(row)
+    kb.append([InlineKeyboardButton(text="⬅️ Ortga", callback_data=f"frm_back:{pid}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("frm:"))
+async def frm_pick(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    _, pid, mid = callback.data.split(":")
+    pid, mid = int(pid), int(mid)
+    materials = await db.get_materials()
+    m = next((x for x in materials if x[0] == mid), None)
+    if not m:
+        await callback.answer("❌", show_alert=True)
+        return
+    await state.update_data(frm_pid=pid, frm_mid=mid, frm_nomi=m[1], frm_birlik=m[4])
+    await state.set_state(FormulaState.miqdor)
+    formula = await db.get_qolip_formula(pid)
+    bor = next((f for f in formula if f[5] == mid), None)
+    izoh = f"\nHozir: {bor[1]} {bor[2]}" if bor else ""
+    rows = []
+    if bor:
+        rows.append([InlineKeyboardButton(
+            text="🗑 Formuladan olib tashlash", callback_data=f"frm_del:{pid}:{mid}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Ortga", callback_data=f"frm_back:{pid}")])
+    try:
+        await callback.message.edit_text(await t(
+            f"📋 {m[1]} — 1 qolipga qancha ketadi?{izoh}\n"
+            f"Sonni kiriting (masalan: 110)", callback.from_user.id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    except Exception:
+        pass
+    await callback.answer()
+
+
 @router.message(FormulaState.miqdor)
-async def mb_formula_miqdor(message: Message, state: FSMContext):
+async def frm_miqdor(message: Message, state: FSMContext):
     try:
         miqdor = float(message.text.replace(",", "."))
-        if miqdor < 0:
+        if miqdor <= 0:
             raise ValueError
-    except ValueError:
-        await say(message, "❌ Faqat musbat son kiriting! Misol: 110 (yoki 0)")
+    except (ValueError, AttributeError):
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 110")
         return
     data = await state.get_data()
-    materials = data["materials"]
-    index = data["index"]
-    m = materials[index]
-
-    if miqdor == 0:
-        # Bu materialni o'tkazib yuboramiz
-        await _formula_keyingi(message, state, data, index)
-        return
-
-    await state.update_data(miqdor=miqdor)
-    await state.set_state(FormulaState.birlik)
-    await say(message,
-              f"{m[1]} uchun birlikni kiriting:\n"
-              f"Misol: kg, g, litr, ml\n(Omborda: {m[4]})")
-
-
-@router.message(FormulaState.birlik)
-async def mb_formula_birlik(message: Message, state: FSMContext):
-    data = await state.get_data()
-    materials = data["materials"]
-    index = data["index"]
-    miqdor = data["miqdor"]
-    birlik = message.text.strip()
-    m = materials[index]
-    if (not db.birlik_qollab_quvvatlanadimi(birlik)
-            or db.birlik_bazasi(birlik) != db.birlik_bazasi(m[4])):
-        await say(message,
-                  f"❌ Birlik '{m[1]}' o'lchamiga mos emas (ombor: {m[4]}).\n"
-                  f"Qaytadan:")
-        return
-    await db.add_qolip_formula(data["pid"], m[0], miqdor, birlik)
-    await _formula_keyingi(message, state, data, index)
-
-
-async def _formula_keyingi(message, state, data, index):
-    materials = data["materials"]
-    index += 1
-    if index < len(materials):
-        await state.update_data(index=index)
-        await state.set_state(FormulaState.miqdor)
-        nm = materials[index]
-        await say(message,
-                  f"1 qolipga {nm[1]} dan qancha ketadi?\n"
-                  f"(Ombordagi birlik: {nm[4]})\nMisol: 50\n0 = kerak emas")
-    else:
-        user = await db.get_user(message.from_user.id)
-        await db.add_audit_log(
-            message.from_user.id, user["ism"] if user else "-",
-            user["rol"] if user else "-", "Qolip formulasi yangilandi",
-            f"product_id={data['pid']}")
+    if "frm_mid" not in data:
         await state.clear()
-        await say(message, "✅ Formula saqlandi!",
-                  reply_markup=await sozlamalar_menu(message.from_user.id))
-        text, kb = await _mb_detail(data["pid"])
-        await message.answer(text, reply_markup=kb)
+        return
+    await state.update_data(frm_miqdor=miqdor)
+    await say(message,
+              f"📏 {data['frm_nomi']}: {miqdor}\nBirlikni tanlang:",
+              reply_markup=_frm_units_kb(data["frm_birlik"], data["frm_pid"]))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("frmunit:"))
+async def frm_unit(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    birlik = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    if "frm_mid" not in data or "frm_miqdor" not in data:
+        await callback.answer()
+        return
+    if db.birlik_bazasi(birlik) != db.birlik_bazasi(data["frm_birlik"]):
+        await callback.answer("❌ Birlik mos emas", show_alert=True)
+        return
+    await db.set_qolip_formula_item(
+        data["frm_pid"], data["frm_mid"], data["frm_miqdor"], birlik)
+    pid = data["frm_pid"]
+    await state.clear()
+    text, kb = await _frm_editor(pid)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        await callback.message.answer(text, reply_markup=kb)
+    await callback.answer("✅ Saqlandi")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("frm_del:"))
+async def frm_del(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    _, pid, mid = callback.data.split(":")
+    pid, mid = int(pid), int(mid)
+    await db.remove_qolip_formula_item(pid, mid)
+    await state.clear()
+    text, kb = await _frm_editor(pid)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer("🗑 Olib tashlandi")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("frm_back:"))
+async def frm_back(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    pid = int(callback.data.split(":", 1)[1])
+    await state.clear()
+    text, kb = await _frm_editor(pid)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("frm_done:"))
+async def frm_done(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    pid = int(callback.data.split(":", 1)[1])
+    await state.clear()
+    text, kb = await _mb_detail(pid)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
