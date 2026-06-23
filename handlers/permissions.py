@@ -5,7 +5,7 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, canon, say, esc, build_keyboard
+from translation import Tkey, canon, say, build_keyboard
 
 router = Router()
 
@@ -170,39 +170,37 @@ async def user_huquqlari(message: Message, state: FSMContext):
         await say(message, "❌ Foydalanuvchi yo'q!",
                   reply_markup=await permissions_menu(message.from_user.id))
         return
-    text = "👤 Qaysi foydalanuvchi?\nID raqamini kiriting:\n\n"
-    for u in faol_users:
-        text += f"🔹 <code>{u['id']}</code> — {esc(u['ism'])} ({u['rol']})\n"
-    await state.set_state(UserPermState.user_id)
-    await say(message, text, parse_mode="HTML")
+    kb = [[InlineKeyboardButton(
+        text=f"{u['ism']} · {ROLLAR_NOMI.get(u['rol'], u['rol'])}",
+        callback_data=f"permu:{u['id']}")] for u in faol_users[:60]]
+    await say(message, "👤 Huquqlarini o'zgartirish uchun foydalanuvchini tanlang:",
+              reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
-@router.message(UserPermState.user_id)
-async def user_id_tanlash(message: Message, state: FSMContext):
-    try:
-        uid = int(message.text.strip())
-    except ValueError:
-        await say(message, "❌ Faqat raqam kiriting!")
-        await state.clear()
+@router.callback_query(lambda c: c.data and c.data.startswith("permu:"))
+async def permu_cb(callback: CallbackQuery):
+    user = await db.get_user(callback.from_user.id)
+    if not user or not await db.has_permission(
+            callback.from_user.id, user["rol"], "foydalanuvchi_boshqaruv"):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
         return
+    uid = int(callback.data.split(":")[1])
     target = await db.get_user(uid)
-    await state.clear()
     if not target:
-        await say(message, "❌ Foydalanuvchi topilmadi!")
+        await callback.answer("❌ Topilmadi", show_alert=True)
         return
     if target["rol"] == "superadmin":
-        await say(message, "❌ Super Admin huquqlari o'zgartirilmaydi!")
+        await callback.answer("❌ Superadmin huquqlari o'zgartirilmaydi", show_alert=True)
         return
-    user = await db.get_user(message.from_user.id)
-    is_super = bool(user and user["rol"] == "superadmin")
+    is_super = user["rol"] == "superadmin"
     kb = await user_perm_keyboard(is_super, uid)
-    await say(
-        message,
-        f"👤 {esc(target['ism'])} ({target['rol']}) huquqlari:\n"
-        f"Tugmani bosib o'zgartiring. (• = individual)",
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    try:
+        await callback.message.edit_text(
+            f"👤 {target['ism']} ({target['rol']}) huquqlari:\n"
+            f"Tugmani bosib o'zgartiring. (• = individual)", reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
 
 
 # ── Toggle callback ──

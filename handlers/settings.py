@@ -520,8 +520,8 @@ async def obuna_menu(user_id):
     return await build_keyboard(user_id, [
         ["➕ Meni qo'shish"],
         ["➖ Meni o'chirish"],
-        ["➕ ID qo'shish"],
-        ["➖ ID o'chirish"],
+        ["➕ Obunachi qo'shish"],
+        ["➖ Obunachi o'chirish"],
         ["🏠 Asosiy menyu"],
     ])
 
@@ -651,46 +651,91 @@ async def meni_ochirish(message: Message):
               reply_markup=await obuna_menu(message.from_user.id))
 
 
-@router.message(Tkey("➕ ID qo'shish"))
-async def id_qoshish(message: Message, state: FSMContext):
+@router.message(Tkey("➕ Obunachi qo'shish"))
+async def obunachi_qoshish(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
         return
     await state.clear()
-    await state.set_state(ObunaState.qoshish)
-    await say(message, "Qo'shiladigan foydalanuvchi ID sini kiriting:")
-
-
-@router.message(ObunaState.qoshish)
-async def id_qoshish_saqlash(message: Message, state: FSMContext):
-    try:
-        uid = int(message.text.strip())
-        await db.add_hisobot_obunachi(uid)
-        await state.clear()
-        await say(message, f"✅ {uid} qo'shildi!",
+    obunalar = set(await db.get_hisobot_obunachilar())
+    users = [u for u in await db.get_all_users() if u["faol"] and u["id"] not in obunalar]
+    if not users:
+        await say(message, "✅ Qo'shish uchun foydalanuvchi yo'q (hammasi obuna).",
                   reply_markup=await obuna_menu(message.from_user.id))
-    except ValueError:
-        await say(message, "❌ Faqat raqam kiriting!")
+        return
+    kb = [[InlineKeyboardButton(text=u["ism"], callback_data=f"obadd:{u['id']}")]
+          for u in users[:60]]
+    kb.append([InlineKeyboardButton(text="✅ Tayyor", callback_data="ob_done")])
+    await message.answer(
+        await t("➕ Obunachi qo'shish — foydalanuvchini tanlang:", message.from_user.id),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
 
-@router.message(Tkey("➖ ID o'chirish"))
-async def id_ochirish(message: Message, state: FSMContext):
+@router.message(Tkey("➖ Obunachi o'chirish"))
+async def obunachi_ochirish(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
         return
     await state.clear()
-    await state.set_state(ObunaState.ochirish)
-    await say(message, "O'chiriladigan foydalanuvchi ID sini kiriting:")
-
-
-@router.message(ObunaState.ochirish)
-async def id_ochirish_saqlash(message: Message, state: FSMContext):
-    try:
-        uid = int(message.text.strip())
-        await db.remove_hisobot_obunachi(uid)
-        await state.clear()
-        await say(message, f"✅ {uid} o'chirildi!",
+    obunalar = await db.get_hisobot_obunachilar()
+    if not obunalar:
+        await say(message, "📭 Obunachilar yo'q.",
                   reply_markup=await obuna_menu(message.from_user.id))
-    except ValueError:
-        await say(message, "❌ Faqat raqam kiriting!")
+        return
+    users = {u["id"]: u["ism"] for u in await db.get_all_users()}
+    kb = [[InlineKeyboardButton(text=str(users.get(uid, uid)), callback_data=f"obdel:{uid}")]
+          for uid in obunalar[:60]]
+    kb.append([InlineKeyboardButton(text="✅ Tayyor", callback_data="ob_done")])
+    await message.answer(
+        await t("➖ Obunachini o'chirish — tanlang:", message.from_user.id),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("obadd:"))
+async def obadd_cb(callback: CallbackQuery):
+    if not await _cb_ok(callback):
+        return
+    uid = int(callback.data.split(":")[1])
+    await db.add_hisobot_obunachi(uid)
+    obunalar = set(await db.get_hisobot_obunachilar())
+    users = [u for u in await db.get_all_users() if u["faol"] and u["id"] not in obunalar]
+    kb = [[InlineKeyboardButton(text=u["ism"], callback_data=f"obadd:{u['id']}")]
+          for u in users[:60]]
+    kb.append([InlineKeyboardButton(text="✅ Tayyor", callback_data="ob_done")])
+    try:
+        await callback.message.edit_text(
+            await t("➕ Obunachi qo'shish (yoki ✅ Tayyor):", callback.from_user.id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    except Exception:
+        pass
+    await callback.answer("✅ Qo'shildi")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("obdel:"))
+async def obdel_cb(callback: CallbackQuery):
+    if not await _cb_ok(callback):
+        return
+    uid = int(callback.data.split(":")[1])
+    await db.remove_hisobot_obunachi(uid)
+    obunalar = await db.get_hisobot_obunachilar()
+    users = {u["id"]: u["ism"] for u in await db.get_all_users()}
+    kb = [[InlineKeyboardButton(text=str(users.get(x, x)), callback_data=f"obdel:{x}")]
+          for x in obunalar[:60]]
+    kb.append([InlineKeyboardButton(text="✅ Tayyor", callback_data="ob_done")])
+    try:
+        await callback.message.edit_text(
+            await t("➖ Obunachini o'chirish (yoki ✅ Tayyor):", callback.from_user.id),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
+    except Exception:
+        pass
+    await callback.answer("✅ O'chirildi")
+
+
+@router.callback_query(lambda c: c.data == "ob_done")
+async def ob_done_cb(callback: CallbackQuery):
+    try:
+        await callback.message.edit_text(await t("✅ Tayyor.", callback.from_user.id))
+    except Exception:
+        pass
+    await callback.answer()
 
 
 # ── PIN kod (qulf) — faqat superadmin ──

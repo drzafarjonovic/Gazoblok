@@ -12,6 +12,7 @@ Qulaylik (UX) yangilanishi — barcha imkoniyatlar saqlangan holda ishlatish anc
 - **O'chirishda tasdiqlash.** Material, blok va shablonni o'chirishda «Ha/Yo'q» so'raladi (tasodifan o'chirib yuborishning oldi olinadi).
 - **Sozlamalar menyusi guruhlandi.** 12 ta tekis tugma o'rniga bo'limlar; «Materiallar» alohida ichki menyuda, «⬅️ Sozlamalar» bilan qaytish.
 - **Narx, minimum chegara va formulani tanlab tahrirlash.** Material narxlari, minimum chegaralar va mahsulot formulasi endi hammasini ketma-ket so'ramaydi — kerakli materialni tugmadan tanlab o'zgartirasiz (formuladan olib tashlash ham mumkin).
+- **Foydalanuvchilar, huquqlar va obunachilar — to'liq tugma asosida.** Profil ko'rish, rol o'zgartirish, ismni o'zgartirish, bloklash/tiklash, superadminlikni o'tkazish, foydalanuvchi huquqlari va hisobot obunachilari endi ID yozish o'rniga ro'yxatdan tanlanadi (xavfli amallarda tasdiqlash bilan). Profil ko'rishdagi xato ham tuzatildi.
 - Inline oqimlarda «❌ Bekor» tugmasi va alohida ruxsat tekshiruvi.
 
 ## v2.0.0
