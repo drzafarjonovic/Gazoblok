@@ -13,6 +13,7 @@ Qulaylik (UX) yangilanishi — barcha imkoniyatlar saqlangan holda ishlatish anc
 - **Sozlamalar menyusi guruhlandi.** 12 ta tekis tugma o'rniga bo'limlar; «Materiallar» alohida ichki menyuda, «⬅️ Sozlamalar» bilan qaytish.
 - **Narx, minimum chegara va formulani tanlab tahrirlash.** Material narxlari, minimum chegaralar va mahsulot formulasi endi hammasini ketma-ket so'ramaydi — kerakli materialni tugmadan tanlab o'zgartirasiz (formuladan olib tashlash ham mumkin).
 - **Foydalanuvchilar, huquqlar va obunachilar — to'liq tugma asosida.** Profil ko'rish, rol o'zgartirish, ismni o'zgartirish, bloklash/tiklash, superadminlikni o'tkazish, foydalanuvchi huquqlari va hisobot obunachilari endi ID yozish o'rniga ro'yxatdan tanlanadi (xavfli amallarda tasdiqlash bilan). Profil ko'rishdagi xato ham tuzatildi.
+- **Menyu ixchamlashtirildi.** Sozlamalardagi kam ishlatiladigan amallar «⚙️ Tizim sozlamalari» ostiga yig'ildi (8 → 5). Foydalanuvchilar bo'limi 14 tadan 7 tugmaga tushdi: «👤 Foydalanuvchilar» ro'yxatidan birini tanlasangiz, uning barcha amallari (profil/rol/ism/bloklash/tiklash/superadmin) bitta panelda chiqadi.
 - Inline oqimlarda «❌ Bekor» tugmasi va alohida ruxsat tekshiruvi.
 
 ## v2.0.0

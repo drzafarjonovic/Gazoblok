@@ -61,11 +61,18 @@ async def sozlamalar_menu(user_id):
         ["🏭 Mahsulot boshqaruvi"],
         ["📦 Materiallar"],
         ["💵 Narxlar va valyuta"],
+        ["⚙️ Tizim sozlamalari"],
+        ["🏠 Asosiy menyu"],
+    ])
+
+
+async def tizim_submenu(user_id):
+    return await build_keyboard(user_id, [
         ["🔔 Hisobot jadvali"],
         ["🔒 PIN kod"],
         ["🌐 Tilni o'zgartirish"],
         ["🗑️ Barcha ma'lumotlarni tozalash"],
-        ["🏠 Asosiy menyu"],
+        ["⬅️ Sozlamalar"],
     ])
 
 
@@ -109,6 +116,14 @@ async def materiallar_bolimi(message: Message):
         return
     await say(message, "📦 Materiallar bo'limi:",
               reply_markup=await materiallar_submenu(message.from_user.id))
+
+
+@router.message(Tkey("⚙️ Tizim sozlamalari"))
+async def tizim_bolimi(message: Message):
+    if not await _faqat_superadmin(message):
+        return
+    await say(message, "⚙️ Tizim sozlamalari:",
+              reply_markup=await tizim_submenu(message.from_user.id))
 
 
 @router.message(Tkey("⬅️ Sozlamalar"))

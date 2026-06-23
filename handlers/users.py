@@ -58,19 +58,12 @@ def _vaqt(v, fmt="%d.%m.%Y %H:%M"):
 
 async def users_menu(user_id):
     return await build_keyboard(user_id, [
-        ["👥 Foydalanuvchilar ro'yxati"],
+        ["👤 Foydalanuvchilar"],
         ["➕ Foydalanuvchi qo'shish"],
         ["📋 Kutilayotgan so'rovlar"],
-        ["👤 Foydalanuvchi profili"],
-        ["🔎 Qidirish"],
-        ["✏️ Rol o'zgartirish"],
-        ["✏️ Ismni o'zgartirish"],
-        ["🗑️ Foydalanuvchini bloklash"],
-        ["♻️ Bloklangani tiklash"],
         ["🔐 Huquqlar boshqaruvi"],
-        ["🔁 Superadminlikni o'tkazish"],
+        ["🔎 Qidirish"],
         ["📋 Audit log"],
-        ["📄 Audit CSV"],
         ["🏠 Asosiy menyu"],
     ])
 
@@ -117,26 +110,6 @@ async def _cb_audit(callback, amal, tafsilot):
         admin["rol"] if admin else "-", amal, tafsilot)
 
 
-async def _user_picker(action, *, manba="faol", exclude_super=False):
-    """Foydalanuvchilarni inline tugmalar qilib chiqaradi.
-    manba: 'faol' | 'blok' | 'all'."""
-    if manba == "blok":
-        users = await db.get_blocked_users()
-    elif manba == "all":
-        users = await db.get_all_users()
-    else:
-        users = [u for u in await db.get_all_users() if u["faol"]]
-    if exclude_super:
-        users = [u for u in users if u["rol"] != "superadmin"]
-    kb = []
-    for u in users[:60]:
-        belgi = "" if u["faol"] else "🚫 "
-        kb.append([InlineKeyboardButton(
-            text=f"{belgi}{u['ism']} · {ROLLAR_NOMI.get(u['rol'], u['rol'])}",
-            callback_data=f"usr:{action}:{u['id']}")])
-    return InlineKeyboardMarkup(inline_keyboard=kb), users
-
-
 async def _profil_text(uid):
     u = await db.get_user(uid)
     if not u:
@@ -169,29 +142,85 @@ async def foydalanuvchilar(message: Message):
               reply_markup=await users_menu(message.from_user.id))
 
 
-@router.message(Tkey("👥 Foydalanuvchilar ro'yxati"))
-async def users_royxati(message: Message):
+async def _uview_list_kb():
+    users = await db.get_all_users()
+    kb = []
+    for u in users[:60]:
+        belgi = "" if u["faol"] else "🚫 "
+        kb.append([InlineKeyboardButton(
+            text=f"{belgi}{u['ism']} · {ROLLAR_NOMI.get(u['rol'], u['rol'])}",
+            callback_data=f"uview:{u['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _uview_panel(uid, viewer_id):
+    text = await _profil_text(uid)
+    if not text:
+        return None, None
+    u = await db.get_user(uid)
+    if not u:
+        blocked = await db.get_blocked_users()
+        u = next((x for x in blocked if x["id"] == uid), None)
+    viewer = await db.get_user(viewer_id)
+    is_super = bool(viewer and viewer["rol"] == "superadmin")
+    rows = []
+    agar_oddiy = u["rol"] != "superadmin"
+    pair = []
+    if agar_oddiy:
+        pair.append(InlineKeyboardButton(text="✏️ Rol", callback_data=f"usr:rol:{uid}"))
+    pair.append(InlineKeyboardButton(text="✏️ Ism", callback_data=f"usr:ism:{uid}"))
+    rows.append(pair)
+    if u["faol"] and agar_oddiy:
+        rows.append([InlineKeyboardButton(text="🗑️ Bloklash", callback_data=f"usr:blok:{uid}")])
+    if not u["faol"]:
+        rows.append([InlineKeyboardButton(text="♻️ Tiklash", callback_data=f"usr:tikla:{uid}")])
+    if is_super and agar_oddiy and u["faol"]:
+        rows.append([InlineKeyboardButton(
+            text="🔁 Superadmin qilish", callback_data=f"usr:super:{uid}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Ro'yxat", callback_data="uview_list")])
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.message(Tkey("👤 Foydalanuvchilar"))
+async def foydalanuvchilar_royxati(message: Message):
     if not await _ruxsat(message):
         return
-    try:
-        users = await db.get_all_users()
-        if not users:
-            await say(message, "❌ Hali foydalanuvchi yo'q!",
-                      reply_markup=await users_menu(message.from_user.id))
-            return
-        text = "👥 Foydalanuvchilar:\n\n"
-        for u in users:
-            status = "✅" if u["faol"] else "🚫"
-            rol_nomi = ROLLAR_NOMI.get(u["rol"], u["rol"])
-            text += (f"{status} {esc(u['ism'])} — {rol_nomi}\n"
-                     f"   <code>{u['id']}</code> "
-                     f"@{esc(u['username']) if u['username'] else 'yoq'}\n")
-        if len(text) > 4000:
-            text = text[:4000] + "\n..."
-        await say(message, text, parse_mode="HTML",
+    users = await db.get_all_users()
+    if not users:
+        await say(message, "❌ Hali foydalanuvchi yo'q!",
                   reply_markup=await users_menu(message.from_user.id))
-    except Exception as e:
-        await say_error(message, e)
+        return
+    await say(message, "👤 Foydalanuvchini tanlang (ko'rish/boshqarish):",
+              reply_markup=await _uview_list_kb())
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("uview:"))
+async def uview_cb(callback: CallbackQuery):
+    if not await _cb_ruxsat(callback):
+        return
+    uid = int(callback.data.split(":")[1])
+    text, kb = await _uview_panel(uid, callback.from_user.id)
+    if not text:
+        await callback.answer("❌ Topilmadi", show_alert=True)
+        return
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "uview_list")
+async def uview_list_cb(callback: CallbackQuery):
+    if not await _cb_ruxsat(callback):
+        return
+    try:
+        await callback.message.edit_text(
+            await t("👤 Foydalanuvchini tanlang:", callback.from_user.id),
+            reply_markup=await _uview_list_kb())
+    except Exception:
+        pass
+    await callback.answer()
 
 
 # ── Qo'lda qo'shish (Telegram ID kerak — tashqi foydalanuvchi) ──
@@ -326,82 +355,7 @@ async def reject_cb(callback: CallbackQuery):
     await _xabar_ber(callback.bot, uid, "❌ Ro'yxatdan o'tish so'rovingiz rad etildi.")
 
 
-# ── Profil / Rol / Ism / Blok / Tikla / Super — inline tanlash ──
-@router.message(Tkey("👤 Foydalanuvchi profili"))
-async def profil_boshla(message: Message):
-    if not await _ruxsat(message):
-        return
-    kb, users = await _user_picker("profil", manba="all")
-    if not users:
-        await say(message, "❌ Foydalanuvchi yo'q.",
-                  reply_markup=await users_menu(message.from_user.id))
-        return
-    await say(message, "👤 Profilini ko'rish uchun foydalanuvchini tanlang:", reply_markup=kb)
-
-
-@router.message(Tkey("✏️ Rol o'zgartirish"))
-async def rol_ozgartirish(message: Message):
-    if not await _ruxsat(message):
-        return
-    kb, users = await _user_picker("rol", manba="faol", exclude_super=True)
-    if not users:
-        await say(message, "❌ O'zgartirish mumkin bo'lgan foydalanuvchi yo'q!",
-                  reply_markup=await users_menu(message.from_user.id))
-        return
-    await say(message, "✏️ Rolini o'zgartirish uchun foydalanuvchini tanlang:", reply_markup=kb)
-
-
-@router.message(Tkey("✏️ Ismni o'zgartirish"))
-async def ism_ozgartirish(message: Message):
-    if not await _ruxsat(message):
-        return
-    kb, users = await _user_picker("ism", manba="all")
-    if not users:
-        await say(message, "❌ Foydalanuvchi yo'q.",
-                  reply_markup=await users_menu(message.from_user.id))
-        return
-    await say(message, "✏️ Ismini o'zgartirish uchun foydalanuvchini tanlang:", reply_markup=kb)
-
-
-@router.message(Tkey("🗑️ Foydalanuvchini bloklash"))
-async def user_bloklash(message: Message):
-    if not await _ruxsat(message):
-        return
-    kb, users = await _user_picker("blok", manba="faol", exclude_super=True)
-    if not users:
-        await say(message, "❌ Bloklash mumkin bo'lgan foydalanuvchi yo'q!",
-                  reply_markup=await users_menu(message.from_user.id))
-        return
-    await say(message, "🗑️ Bloklash uchun foydalanuvchini tanlang:", reply_markup=kb)
-
-
-@router.message(Tkey("♻️ Bloklangani tiklash"))
-async def user_tiklash(message: Message):
-    if not await _ruxsat(message):
-        return
-    kb, users = await _user_picker("tikla", manba="blok")
-    if not users:
-        await say(message, "✅ Bloklangan foydalanuvchi yo'q.",
-                  reply_markup=await users_menu(message.from_user.id))
-        return
-    await say(message, "♻️ Tiklash uchun foydalanuvchini tanlang:", reply_markup=kb)
-
-
-@router.message(Tkey("🔁 Superadminlikni o'tkazish"))
-async def super_transfer(message: Message):
-    user = await db.get_user(message.from_user.id)
-    if not user or user["rol"] != "superadmin":
-        await say(message, "❌ Bu amal faqat Super Admin uchun!")
-        return
-    kb, users = await _user_picker("super", manba="faol", exclude_super=True)
-    if not users:
-        await say(message, "❌ Mos foydalanuvchi yo'q.",
-                  reply_markup=await users_menu(message.from_user.id))
-        return
-    await say(message, "🔁 Kimga Super Adminlik o'tkaziladi?\n"
-                       "⚠️ Siz Direktor roliga o'tasiz!", reply_markup=kb)
-
-
+# ── Foydalanuvchi paneli amallari (profil panelidan chaqiriladi) ──
 @router.callback_query(lambda c: c.data and c.data.startswith("usr:"))
 async def usr_cb(callback: CallbackQuery, state: FSMContext):
     if not await _cb_ruxsat(callback):
@@ -622,15 +576,16 @@ async def audit_log(message: Message):
                      f"📌 {log['amal']}\n📝 {esc(log['tafsilot'] or '')}\n\n")
         if len(text) > 4000:
             text = text[:4000] + "\n..."
-        await say(message, text, parse_mode="HTML",
-                  reply_markup=await users_menu(message.from_user.id))
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="📄 CSV yuklab olish", callback_data="auditcsv")]])
+        await say(message, text, parse_mode="HTML", reply_markup=kb)
     except Exception as e:
         await say_error(message, e)
 
 
-@router.message(Tkey("📄 Audit CSV"))
-async def audit_csv(message: Message):
-    if not await _ruxsat(message):
+@router.callback_query(lambda c: c.data == "auditcsv")
+async def auditcsv_cb(callback: CallbackQuery):
+    if not await _cb_ruxsat(callback):
         return
     logs = await db.get_audit_log(500)
     out = io.StringIO()
@@ -640,5 +595,7 @@ async def audit_csv(message: Message):
         w.writerow([_vaqt(log["vaqt"]), log["ism"] or "", log["rol"] or "",
                     log["amal"] or "", log["tafsilot"] or ""])
     data = ("\ufeff" + out.getvalue()).encode("utf-8")
-    cap = await t("📄 Audit log (CSV)", message.from_user.id)
-    await message.answer_document(BufferedInputFile(data, "audit_log.csv"), caption=cap)
+    cap = await t("📄 Audit log (CSV)", callback.from_user.id)
+    await callback.message.answer_document(
+        BufferedInputFile(data, "audit_log.csv"), caption=cap)
+    await callback.answer()
