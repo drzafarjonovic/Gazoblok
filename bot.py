@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from typing import Callable, Dict, Any, Awaitable
 import database as db
 from translation import (
-    t, tarjima_qil, foydalanuvchi_tili, invalidate_til_cache,
+    t, tarjima_qil, invalidate_til_cache,
     build_keyboard, Tkey, TIL_NOMLARI, prewarm, ensure_warm, esc, log_exc,
 )
 from handlers import (settings, production, sales, warehouse,

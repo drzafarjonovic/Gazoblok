@@ -6,12 +6,16 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
 import valyuta as val
-from translation import Tkey, eq, say, say_error, build_keyboard, t
+from translation import Tkey, say, say_error, build_keyboard, t
 
 router = Router()
 
 
 class MaterialNarxState(StatesGroup):
+    qiymat = State()
+
+
+class QolKursState(StatesGroup):
     qiymat = State()
 
 
@@ -31,19 +35,11 @@ class OverrideState(StatesGroup):
     qiymat = State()
 
 
-class QolKursState(StatesGroup):
-    qiymat = State()
-
-
 async def narxlar_menu(user_id):
     return await build_keyboard(user_id, [
         ["💱 Valyuta"],
         ["📦 Material narxlari"],
-        ["🧱 Sotuv narxlari"],
-        ["👷 Ishchi haqi"],
-        ["🛠 Qo'shimcha xarajat"],
-        ["🎯 Tannarx override"],
-        ["📊 Hisoblangan tannarx"],
+        ["🏷 Mahsulot narxlari"],
         ["🏠 Asosiy menyu"],
     ])
 
@@ -56,6 +52,18 @@ async def _faqat_superadmin(message: Message) -> bool:
     if await db.has_permission(message.from_user.id, user["rol"], "sozlama_boshqaruv"):
         return True
     await say(message, "❌ Sizda narxlarni boshqarish huquqi yo'q!")
+    return False
+
+
+async def _cb_ok(callback: CallbackQuery) -> bool:
+    user = await db.get_user(callback.from_user.id)
+    if not user or not user["faol"]:
+        await callback.answer("❌", show_alert=True)
+        return False
+    if user["rol"] == "superadmin" or await db.has_permission(
+            callback.from_user.id, user["rol"], "sozlama_boshqaruv"):
+        return True
+    await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
     return False
 
 
@@ -108,8 +116,7 @@ async def qol_kurs(message: Message, state: FSMContext):
     await say(
         message,
         "✍️ Qo'lda kurs kiriting (1 birlik necha so'm).\n"
-        "Format: KOD QIYMAT\n"
-        "Misol: USD 12600"
+        "Format: KOD QIYMAT\nMisol: USD 12600"
     )
 
 
@@ -160,17 +167,15 @@ async def valyuta_callback(callback: CallbackQuery):
                      "'✍️ Qo'lda kurs kiritish' orqali kiriting.")
     xabar = await t(matn, callback.from_user.id)
     await callback.message.edit_text(xabar)
-    # Qo'lda kurs imkoni bilan menyu
     kb = await build_keyboard(callback.from_user.id, [
         ["✍️ Qo'lda kurs kiritish"],
         ["🏠 Asosiy menyu"],
     ])
     await callback.message.answer(
-        await t("Tayyor.", callback.from_user.id), reply_markup=kb
-    )
+        await t("Tayyor.", callback.from_user.id), reply_markup=kb)
 
 
-# ── Material narxlari (materiallar bo'ylab aylanish) ──
+# ── Material narxlari (umumiy, materiallar bo'ylab) ──
 @router.message(Tkey("📦 Material narxlari"))
 async def material_narxlari(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
@@ -178,17 +183,13 @@ async def material_narxlari(message: Message, state: FSMContext):
     await state.clear()
     materials = await db.get_materials()
     if not materials:
-        await say(
-            message, "❌ Avval material qo'shing!",
-            reply_markup=await narxlar_menu(message.from_user.id)
-        )
+        await say(message, "❌ Avval material qo'shing!",
+                  reply_markup=await narxlar_menu(message.from_user.id))
         return
     narxlar = await db.get_material_narxlar()
     kod = await val.get_active()
     await state.update_data(
-        materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials],
-        index=0
-    )
+        materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials], index=0)
     await state.set_state(MaterialNarxState.qiymat)
     await _material_narx_sorov(message, materials[0], narxlar, kod)
 
@@ -196,7 +197,6 @@ async def material_narxlari(message: Message, state: FSMContext):
 async def _material_narx_sorov(message, m, narxlar, kod):
     narx_base = narxlar.get(m[0], 0) or 0
     if narx_base > 0:
-        # 1 asl_birlik narxi = narx_base * (1 asl_birlik necha baza)
         per_display = narx_base * db.birlikni_asosiyga(1, m[4])[0]
         joriy = await val.format_uzs(per_display) + f" / {m[4]}"
     else:
@@ -206,8 +206,7 @@ async def _material_narx_sorov(message, m, narxlar, kod):
         f"📦 {m[1]} narxi?\n"
         f"1 birlik narxini va birlikni yozing.\n"
         f"Misol: 800000 {m[4]}  yoki  800 kg\n"
-        f"(Faol valyuta: {kod}; o'tkazib yuborish: 0)\n"
-        f"Joriy: {joriy}"
+        f"(Faol valyuta: {kod}; o'tkazib yuborish: 0)\nJoriy: {joriy}"
     )
 
 
@@ -225,10 +224,7 @@ async def material_narx_saqlash(message: Message, state: FSMContext):
         else:
             parts = text.split()
             if len(parts) < 2:
-                await say(
-                    message,
-                    "❌ Format: <narx> <birlik>\nMisol: 800000 tonna\n(yoki 0)"
-                )
+                await say(message, "❌ Format: <narx> <birlik>\nMisol: 800000 tonna\n(yoki 0)")
                 return
             narx = float(parts[0].replace(",", "."))
             birlik = parts[1].lower()
@@ -236,21 +232,16 @@ async def material_narx_saqlash(message: Message, state: FSMContext):
                 raise ValueError
             if (not db.birlik_qollab_quvvatlanadimi(birlik)
                     or db.birlik_bazasi(birlik) != db.birlik_bazasi(m[4])):
-                await say(
-                    message,
-                    f"❌ Birlik '{m[1]}' o'lchamiga mos emas (ombor: {m[4]}).\n"
-                    f"Qaytadan:"
-                )
+                await say(message,
+                          f"❌ Birlik '{m[1]}' o'lchamiga mos emas (ombor: {m[4]}).\n"
+                          f"Qaytadan:")
                 return
-            # 1 birlik necha baza -> 1 baza narxi (faol valyuta) -> UZS
             unit_factor = db.birlikni_asosiyga(1, birlik)[0]
             narx_base_active = narx / unit_factor if unit_factor else narx
             narx_base_uzs = await val.active_to_uzs(narx_base_active)
             if narx_base_uzs is None:
-                await say(
-                    message,
-                    "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'."
-                )
+                await say(message,
+                          "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
                 return
 
         await db.set_material_narx(m[0], narx_base_uzs)
@@ -264,17 +255,12 @@ async def material_narx_saqlash(message: Message, state: FSMContext):
         else:
             user = await db.get_user(message.from_user.id)
             await db.add_audit_log(
-                message.from_user.id,
-                user["ism"] if user else str(message.from_user.id),
-                user["rol"] if user else "-",
-                "Material narxlari yangilandi",
-                f"{len(materials)} ta material narxi saqlandi"
-            )
+                message.from_user.id, user["ism"] if user else str(message.from_user.id),
+                user["rol"] if user else "-", "Material narxlari yangilandi",
+                f"{len(materials)} ta material narxi saqlandi")
             await state.clear()
-            await say(
-                message, "✅ Material narxlari saqlandi!",
-                reply_markup=await narxlar_menu(message.from_user.id)
-            )
+            await say(message, "✅ Material narxlari saqlandi!",
+                      reply_markup=await narxlar_menu(message.from_user.id))
     except ValueError:
         await say(message, "❌ Faqat musbat son! Misol: 800000 tonna")
     except Exception as e:
@@ -282,239 +268,262 @@ async def material_narx_saqlash(message: Message, state: FSMContext):
         await say_error(message, e, reply_markup=await narxlar_menu(message.from_user.id))
 
 
-# ── Sotuv narxlari (A keyin B) ──
-@router.message(Tkey("🧱 Sotuv narxlari"))
-async def sotuv_narxlari(message: Message, state: FSMContext):
+# ════════════════════════════════════════════════════════════════════
+# 🏷 MAHSULOT NARXLARI (product-aware, inline)
+# ════════════════════════════════════════════════════════════════════
+async def _mahsulot_narx_kb():
+    prods = await db.get_mahsulotlar(faqat_faol=False)
+    kb = []
+    for p in prods:
+        belgi = "" if p["faol"] else " (arxiv)"
+        kb.append([InlineKeyboardButton(
+            text=f"{p['emoji']} {p['nomi']}{belgi}",
+            callback_data=f"pr_p:{p['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _mahsulot_narx_detail(pid):
+    p = await db.get_mahsulot(pid)
+    if not p:
+        return "❌ Mahsulot topilmadi.", InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Ortga", callback_data="pr_root")]])
+    ti = await db.tannarx_hisobla(pid)
+    text = f"🏷 {p['emoji']} {p['nomi']} narxlari\n\n"
+    text += f"👷 Ish haqi (1 qolip): {await val.format_uzs(ti['ishchi'])}\n"
+    text += f"🛠 Qo'shimcha (1 qolip): {await val.format_uzs(ti['qoshimcha'])}\n"
+    text += f"📦 Material (1 qolip): {await val.format_uzs(ti['material'])}\n"
+    text += f"💠 1 qolip tannarxi: {await val.format_uzs(ti['qolip'])}\n\n"
+    text += "🧱 Bloklar (tannarx | sotuv):\n"
+    bloklar = await db.get_bloklar(pid)
+    narx_map = {b["kod"]: b["sotuv_narx"] for b in bloklar}
+    for b in ti["bloklar"]:
+        belgi = " (override)" if b["override"] is not None else ""
+        sotuv = narx_map.get(b["kod"], 0) or 0
+        text += (f"   {b['nomi']}: {await val.format_uzs(b['final'])}{belgi} | "
+                 f"sotuv {await val.format_uzs(sotuv)}\n")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧱 Sotuv narxlari", callback_data=f"pr_sn:{pid}")],
+        [InlineKeyboardButton(text="👷 Ish haqi", callback_data=f"pr_ish:{pid}"),
+         InlineKeyboardButton(text="🛠 Qo'shimcha", callback_data=f"pr_qsh:{pid}")],
+        [InlineKeyboardButton(text="🎯 Tannarx override", callback_data=f"pr_ov:{pid}")],
+        [InlineKeyboardButton(text="⬅️ Ortga", callback_data="pr_root")],
+    ])
+    return text, kb
+
+
+@router.message(Tkey("🏷 Mahsulot narxlari"))
+async def mahsulot_narxlari(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
         return
     await state.clear()
+    prods = await db.get_mahsulotlar(faqat_faol=False)
+    if not prods:
+        await say(message, "❌ Avval mahsulot qo'shing!\n"
+                           "⚙️ Sozlamalar → 🏭 Mahsulot boshqaruvi",
+                  reply_markup=await narxlar_menu(message.from_user.id))
+        return
     kod = await val.get_active()
-    joriy = await db.get_bot_setting("sotuv_narx_A")
-    joriy_t = await val.format_uzs(float(joriy)) if joriy else "belgilanmagan"
-    await state.update_data(step="A")
-    await state.set_state(SotuvNarxState.qiymat)
-    await say(
-        message,
-        f"🧱 A blok sotuv narxi? (1 dona)\n"
-        f"(Faol valyuta: {kod})\nJoriy: {joriy_t}\nMisol: 12000"
-    )
+    await message.answer(
+        await t(f"🏷 Mahsulot narxlari\nFaol valyuta: {kod}\nMahsulotni tanlang:",
+                message.from_user.id),
+        reply_markup=await _mahsulot_narx_kb())
 
 
+@router.callback_query(lambda c: c.data and c.data.startswith("pr_"))
+async def pr_callback(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    action, _, arg = callback.data.partition(":")
+    pid = int(arg) if arg.isdigit() else None
+
+    if action == "pr_root":
+        await state.clear()
+        await callback.message.edit_text(
+            await t("🏷 Mahsulot narxlari\nMahsulotni tanlang:", callback.from_user.id),
+            reply_markup=await _mahsulot_narx_kb())
+        await callback.answer()
+        return
+
+    if action == "pr_p":
+        await state.clear()
+        text, kb = await _mahsulot_narx_detail(pid)
+        await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    if action == "pr_sn":
+        bloklar = await db.get_bloklar(pid)
+        if not bloklar:
+            await callback.answer("❌ Avval blok qo'shing!", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(pid=pid, bloklar=bloklar, index=0, rejim="sotuv")
+        await state.set_state(SotuvNarxState.qiymat)
+        await _blok_narx_sorov(callback.message, callback.from_user.id, bloklar[0], "sotuv")
+        await callback.answer()
+        return
+
+    if action == "pr_ov":
+        bloklar = await db.get_bloklar(pid)
+        if not bloklar:
+            await callback.answer("❌ Avval blok qo'shing!", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(pid=pid, bloklar=bloklar, index=0, rejim="override")
+        await state.set_state(OverrideState.qiymat)
+        await _blok_narx_sorov(callback.message, callback.from_user.id, bloklar[0], "override")
+        await callback.answer()
+        return
+
+    if action == "pr_ish":
+        await state.clear()
+        await state.update_data(pid=pid)
+        await state.set_state(IshchiHaqiState.qiymat)
+        p = await db.get_mahsulot(pid)
+        kod = await val.get_active()
+        joriy = await val.format_uzs(p["ishchi_haqi"]) if p else "—"
+        await callback.message.answer(await t(
+            f"👷 1 qolipga ishchi haqi?\n(Faol valyuta: {kod})\nJoriy: {joriy}\nMisol: 5000",
+            callback.from_user.id))
+        await callback.answer()
+        return
+
+    if action == "pr_qsh":
+        await state.clear()
+        await state.update_data(pid=pid)
+        await state.set_state(QoshimchaState.qiymat)
+        p = await db.get_mahsulot(pid)
+        kod = await val.get_active()
+        joriy = await val.format_uzs(p["qoshimcha_xarajat"]) if p else "—"
+        await callback.message.answer(await t(
+            f"🛠 1 qolipga qo'shimcha xarajat?\n(Faol valyuta: {kod})\n"
+            f"Joriy: {joriy}\nMisol: 2000", callback.from_user.id))
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+
+async def _blok_narx_sorov(message, user_id, blok, rejim):
+    kod = await val.get_active()
+    if rejim == "override":
+        joriy = (await val.format_uzs(blok["tannarx_override"])
+                 if blok["tannarx_override"] is not None else "avtomatik")
+        await message.answer(await t(
+            f"🎯 {blok['nomi']} tannarx override?\n"
+            f"(Faol valyuta: {kod}; joriy: {joriy})\n"
+            f"Avtomatga qaytarish: 0\nMisol: 9000", user_id))
+    else:
+        joriy = await val.format_uzs(blok["sotuv_narx"]) if blok["sotuv_narx"] else "belgilanmagan"
+        await message.answer(await t(
+            f"🧱 {blok['nomi']} sotuv narxi? (1 dona)\n"
+            f"(Faol valyuta: {kod})\nJoriy: {joriy}\nMisol: 12000", user_id))
+
+
+async def _narx_menu_msg(message, user_id):
+    await say(message, "✅ Saqlandi!", reply_markup=await narxlar_menu(user_id))
+
+
+# ── Sotuv narxi (bloklar bo'ylab) ──
 @router.message(SotuvNarxState.qiymat)
 async def sotuv_narx_saqlash(message: Message, state: FSMContext):
+    user_id = message.from_user.id
     try:
         qiymat = float(message.text.replace(",", "."))
         if qiymat < 0:
             raise ValueError
-        uzs = await val.active_to_uzs(qiymat)
-        if uzs is None:
-            await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
-            return
-        data = await state.get_data()
-        step = data.get("step", "A")
-        if step == "A":
-            await db.set_bot_setting("sotuv_narx_A", str(uzs))
-            await state.update_data(step="B")
-            kod = await val.get_active()
-            joriy = await db.get_bot_setting("sotuv_narx_B")
-            joriy_t = await val.format_uzs(float(joriy)) if joriy else "belgilanmagan"
-            await say(
-                message,
-                f"🧱 B blok sotuv narxi? (1 dona)\n"
-                f"(Faol valyuta: {kod})\nJoriy: {joriy_t}\nMisol: 7000"
-            )
-        else:
-            await db.set_bot_setting("sotuv_narx_B", str(uzs))
-            user = await db.get_user(message.from_user.id)
-            await db.add_audit_log(
-                message.from_user.id,
-                user["ism"] if user else str(message.from_user.id),
-                user["rol"] if user else "-",
-                "Sotuv narxlari yangilandi", "A va B blok narxi"
-            )
-            await state.clear()
-            await say(
-                message, "✅ Sotuv narxlari saqlandi!",
-                reply_markup=await narxlar_menu(message.from_user.id)
-            )
     except ValueError:
         await say(message, "❌ Faqat musbat son! Misol: 12000")
-    except Exception as e:
-        await state.clear()
-        await say_error(message, e, reply_markup=await narxlar_menu(message.from_user.id))
-
-
-# ── Ishchi haqi (1 qolipga) ──
-@router.message(Tkey("👷 Ishchi haqi"))
-async def ishchi_haqi(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
         return
-    await state.clear()
-    kod = await val.get_active()
-    joriy = await db.get_bot_setting("ishchi_haqi_qolip")
-    joriy_t = await val.format_uzs(float(joriy)) if joriy else "belgilanmagan"
-    await state.set_state(IshchiHaqiState.qiymat)
-    await say(
-        message,
-        f"👷 1 qolipga ishchi haqi?\n(Faol valyuta: {kod})\n"
-        f"Joriy: {joriy_t}\nMisol: 5000"
-    )
-
-
-@router.message(IshchiHaqiState.qiymat)
-async def ishchi_haqi_saqlash(message: Message, state: FSMContext):
-    try:
-        qiymat = float(message.text.replace(",", "."))
-        if qiymat < 0:
-            raise ValueError
-        uzs = await val.active_to_uzs(qiymat)
-        if uzs is None:
-            await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
-            return
-        await db.set_bot_setting("ishchi_haqi_qolip", str(uzs))
-        await state.clear()
-        await say(
-            message, "✅ Ishchi haqi saqlandi!",
-            reply_markup=await narxlar_menu(message.from_user.id)
-        )
-    except ValueError:
-        await say(message, "❌ Faqat musbat son! Misol: 5000")
-    except Exception as e:
-        await state.clear()
-        await say_error(message, e, reply_markup=await narxlar_menu(message.from_user.id))
-
-
-# ── Qo'shimcha xarajat (1 qolipga) ──
-@router.message(Tkey("🛠 Qo'shimcha xarajat"))
-async def qoshimcha(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
+    uzs = await val.active_to_uzs(qiymat)
+    if uzs is None:
+        await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
         return
-    await state.clear()
-    kod = await val.get_active()
-    joriy = await db.get_bot_setting("qoshimcha_xarajat_qolip")
-    joriy_t = await val.format_uzs(float(joriy)) if joriy else "belgilanmagan"
-    await state.set_state(QoshimchaState.qiymat)
-    await say(
-        message,
-        f"🛠 1 qolipga qo'shimcha xarajat? (elektr, suv va h.k.)\n"
-        f"(Faol valyuta: {kod})\nJoriy: {joriy_t}\nMisol: 2000"
-    )
-
-
-@router.message(QoshimchaState.qiymat)
-async def qoshimcha_saqlash(message: Message, state: FSMContext):
-    try:
-        qiymat = float(message.text.replace(",", "."))
-        if qiymat < 0:
-            raise ValueError
-        uzs = await val.active_to_uzs(qiymat)
-        if uzs is None:
-            await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
-            return
-        await db.set_bot_setting("qoshimcha_xarajat_qolip", str(uzs))
+    data = await state.get_data()
+    bloklar = data["bloklar"]
+    index = data["index"]
+    await db.set_blok_sotuv_narx(bloklar[index]["id"], uzs)
+    index += 1
+    if index < len(bloklar):
+        await state.update_data(index=index)
+        await _blok_narx_sorov(message, user_id, bloklar[index], "sotuv")
+    else:
         await state.clear()
-        await say(
-            message, "✅ Qo'shimcha xarajat saqlandi!",
-            reply_markup=await narxlar_menu(message.from_user.id)
-        )
-    except ValueError:
-        await say(message, "❌ Faqat musbat son! Misol: 2000")
-    except Exception as e:
-        await state.clear()
-        await say_error(message, e, reply_markup=await narxlar_menu(message.from_user.id))
+        await say(message, "✅ Sotuv narxlari saqlandi!",
+                  reply_markup=await narxlar_menu(user_id))
 
 
-# ── Tannarx override (A keyin B) ──
-@router.message(Tkey("🎯 Tannarx override"))
-async def override_boshla(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
-        return
-    await state.clear()
-    t_info = await db.tannarx_hisobla()
-    kod = await val.get_active()
-    avto = await val.format_uzs(t_info["A_auto"])
-    await state.update_data(step="A")
-    await state.set_state(OverrideState.qiymat)
-    await say(
-        message,
-        f"🎯 A blok tannarx override?\n"
-        f"(Faol valyuta: {kod}; avtomatik: {avto})\n"
-        f"Avtomatga qaytarish: 0\nMisol: 9000"
-    )
-
-
+# ── Tannarx override (bloklar bo'ylab) ──
 @router.message(OverrideState.qiymat)
 async def override_saqlash(message: Message, state: FSMContext):
+    user_id = message.from_user.id
     try:
         qiymat = float(message.text.replace(",", "."))
         if qiymat < 0:
             raise ValueError
-        data = await state.get_data()
-        step = data.get("step", "A")
-        kalit = "tannarx_override_A" if step == "A" else "tannarx_override_B"
-        if qiymat == 0:
-            await db.set_bot_setting(kalit, "")  # avtomatga qaytarish
-        else:
-            uzs = await val.active_to_uzs(qiymat)
-            if uzs is None:
-                await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
-                return
-            await db.set_bot_setting(kalit, str(uzs))
-
-        if step == "A":
-            t_info = await db.tannarx_hisobla()
-            kod = await val.get_active()
-            avto = await val.format_uzs(t_info["B_auto"])
-            await state.update_data(step="B")
-            await say(
-                message,
-                f"🎯 B blok tannarx override?\n"
-                f"(Faol valyuta: {kod}; avtomatik: {avto})\n"
-                f"Avtomatga qaytarish: 0\nMisol: 5000"
-            )
-        else:
-            await state.clear()
-            await say(
-                message, "✅ Override saqlandi!",
-                reply_markup=await narxlar_menu(message.from_user.id)
-            )
     except ValueError:
         await say(message, "❌ Faqat son! (0 = avtomat)")
-    except Exception as e:
-        await state.clear()
-        await say_error(message, e, reply_markup=await narxlar_menu(message.from_user.id))
-
-
-# ── Hisoblangan tannarx (faqat ko'rish) ──
-@router.message(Tkey("📊 Hisoblangan tannarx"))
-async def hisoblangan_tannarx(message: Message):
-    if not await _faqat_superadmin(message):
         return
+    data = await state.get_data()
+    bloklar = data["bloklar"]
+    index = data["index"]
+    if qiymat == 0:
+        await db.set_blok_override(bloklar[index]["id"], None)
+    else:
+        uzs = await val.active_to_uzs(qiymat)
+        if uzs is None:
+            await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
+            return
+        await db.set_blok_override(bloklar[index]["id"], uzs)
+    index += 1
+    if index < len(bloklar):
+        await state.update_data(index=index)
+        await _blok_narx_sorov(message, user_id, bloklar[index], "override")
+    else:
+        await state.clear()
+        await say(message, "✅ Override saqlandi!",
+                  reply_markup=await narxlar_menu(user_id))
+
+
+# ── Ish haqi ──
+@router.message(IshchiHaqiState.qiymat)
+async def ishchi_haqi_saqlash(message: Message, state: FSMContext):
+    user_id = message.from_user.id
     try:
-        ti = await db.tannarx_hisobla()
-        sotuv_A = await db.get_bot_setting("sotuv_narx_A")
-        sotuv_B = await db.get_bot_setting("sotuv_narx_B")
-        sotuv_A = float(sotuv_A) if sotuv_A else 0.0
-        sotuv_B = float(sotuv_B) if sotuv_B else 0.0
+        qiymat = float(message.text.replace(",", "."))
+        if qiymat < 0:
+            raise ValueError
+    except ValueError:
+        await say(message, "❌ Faqat musbat son! Misol: 5000")
+        return
+    uzs = await val.active_to_uzs(qiymat)
+    if uzs is None:
+        await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
+        return
+    data = await state.get_data()
+    await db.set_mahsulot_ishchi_haqi(data["pid"], uzs)
+    await state.clear()
+    await say(message, "✅ Ishchi haqi saqlandi!",
+              reply_markup=await narxlar_menu(user_id))
 
-        text = "📊 Hisoblangan tannarx (1 qolip):\n\n"
-        for d in ti["tafsil"]:
-            text += f"   {d['nomi']}: {await val.format_uzs(d['summa'])}\n"
-        text += f"\n   Material: {await val.format_uzs(ti['material'])}\n"
-        text += f"   Ishchi haqi: {await val.format_uzs(ti['ishchi'])}\n"
-        text += f"   Qo'shimcha: {await val.format_uzs(ti['qoshimcha'])}\n"
-        text += f"   ─────\n   1 qolip tannarxi: {await val.format_uzs(ti['qolip'])}\n\n"
 
-        a_belgi = " (override)" if ti["A_override"] is not None else ""
-        b_belgi = " (override)" if ti["B_override"] is not None else ""
-        text += f"🧱 1 A blok tannarxi: {await val.format_uzs(ti['A'])}{a_belgi}\n"
-        text += f"🧱 1 B blok tannarxi: {await val.format_uzs(ti['B'])}{b_belgi}\n\n"
-
-        text += f"💰 Sotuv narxi A: {await val.format_uzs(sotuv_A)}\n"
-        text += f"💰 Sotuv narxi B: {await val.format_uzs(sotuv_B)}\n"
-        text += f"📈 Foyda A: {await val.format_uzs(sotuv_A - ti['A'])}\n"
-        text += f"📈 Foyda B: {await val.format_uzs(sotuv_B - ti['B'])}"
-
-        await say(message, text, reply_markup=await narxlar_menu(message.from_user.id))
-    except Exception as e:
-        await say_error(message, e, reply_markup=await narxlar_menu(message.from_user.id))
+# ── Qo'shimcha xarajat ──
+@router.message(QoshimchaState.qiymat)
+async def qoshimcha_saqlash(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    try:
+        qiymat = float(message.text.replace(",", "."))
+        if qiymat < 0:
+            raise ValueError
+    except ValueError:
+        await say(message, "❌ Faqat musbat son! Misol: 2000")
+        return
+    uzs = await val.active_to_uzs(qiymat)
+    if uzs is None:
+        await say(message, "❌ Valyuta kursi topilmadi! Avval '✍️ Qo'lda kurs kiritish'.")
+        return
+    data = await state.get_data()
+    await db.set_mahsulot_qoshimcha(data["pid"], uzs)
+    await state.clear()
+    await say(message, "✅ Qo'shimcha xarajat saqlandi!",
+              reply_markup=await narxlar_menu(user_id))

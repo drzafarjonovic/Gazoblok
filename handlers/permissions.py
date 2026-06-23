@@ -5,7 +5,7 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, canon, say, say_error, esc, build_keyboard
+from translation import Tkey, canon, say, esc, build_keyboard
 
 router = Router()
 
