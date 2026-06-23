@@ -159,6 +159,40 @@ async def close_pool():
         _pool = None
 
 
+# ════════════════════════════════════════════════════════════════════
+# Xotira keshi (har-xabar DB aylanishlarini kamaytirish uchun)
+# Bot bitta jarayonda ishlagani uchun bu kesh izchil.
+# ════════════════════════════════════════════════════════════════════
+_USER_TTL = 20.0
+_SETTINGS_TTL = 30.0
+_PERM_TTL = 20.0
+_TOUCH_INTERVAL = 60.0
+
+_user_cache = {}      # {uid: (user_dict|None, ts)}
+_settings_cache = {}  # {kalit: (qiymat|None, ts)}
+_perm_cache = {}      # {uid: (perms_dict, ts, rol)}
+_touch_ts = {}        # {uid: monotonic}
+
+
+def _invalidate_user(uid):
+    _user_cache.pop(uid, None)
+    _perm_cache.pop(uid, None)
+
+
+def _invalidate_settings(kalit=None):
+    if kalit is None:
+        _settings_cache.clear()
+    else:
+        _settings_cache.pop(kalit, None)
+
+
+def invalidate_all_caches():
+    _user_cache.clear()
+    _settings_cache.clear()
+    _perm_cache.clear()
+    _touch_ts.clear()
+
+
 
 # ── Database init ──
 async def init_db():
@@ -515,6 +549,10 @@ async def _migrate_to_dynamic(conn):
 
 # ── Permissions ──
 async def get_user_permissions(user_id, rol):
+    now = time.monotonic()
+    hit = _perm_cache.get(user_id)
+    if hit and hit[2] == rol and now - hit[1] < _PERM_TTL:
+        return dict(hit[0])
     pool = await get_pool()
     async with pool.acquire() as conn:
         rol_rows = await conn.fetch(
@@ -526,7 +564,8 @@ async def get_user_permissions(user_id, rol):
         )
         for r in user_rows:
             perms[r["permission"]] = r["ruxsat"]
-        return perms
+    _perm_cache[user_id] = (perms, now, rol)
+    return dict(perms)
 
 async def get_rol_permissions(rol):
     pool = await get_pool()
@@ -544,6 +583,7 @@ async def set_rol_permission(rol, permission, ruxsat):
             VALUES ($1, $2, $3)
             ON CONFLICT (rol, permission) DO UPDATE SET ruxsat=$3
         """, rol, permission, ruxsat)
+    _perm_cache.clear()  # rol o'zgarishi barcha shu roldagilarga ta'sir qiladi
 
 async def get_user_individual_permissions(user_id):
     pool = await get_pool()
@@ -561,6 +601,7 @@ async def set_user_permission(user_id, permission, ruxsat):
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id, permission) DO UPDATE SET ruxsat=$3
         """, user_id, permission, ruxsat)
+    _perm_cache.pop(user_id, None)
 
 async def clear_user_permissions(user_id):
     pool = await get_pool()
@@ -568,6 +609,7 @@ async def clear_user_permissions(user_id):
         await conn.execute(
             "DELETE FROM user_permissions WHERE user_id=$1", user_id
         )
+    _perm_cache.pop(user_id, None)
 
 async def has_permission(user_id, rol, permission):
     perms = await get_user_permissions(user_id, rol)
@@ -575,12 +617,18 @@ async def has_permission(user_id, rol, permission):
 
 # ── Foydalanuvchilar ──
 async def get_user(user_id):
+    now = time.monotonic()
+    hit = _user_cache.get(user_id)
+    if hit and now - hit[1] < _USER_TTL:
+        return dict(hit[0]) if hit[0] is not None else None
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM users WHERE id=$1 AND faol=TRUE", user_id
         )
-        return dict(row) if row else None
+    d = dict(row) if row else None
+    _user_cache[user_id] = (d, now)
+    return dict(d) if d is not None else None
 
 async def add_user(user_id, ism, username, rol):
     pool = await get_pool()
@@ -591,6 +639,7 @@ async def add_user(user_id, ism, username, rol):
             ON CONFLICT (id) DO UPDATE
             SET ism=$2, username=$3, rol=$4, faol=TRUE
         """, user_id, ism, username, rol)
+    _invalidate_user(user_id)
 
 async def get_all_users():
     pool = await get_pool()
@@ -606,6 +655,7 @@ async def update_user_rol(user_id, rol):
         await conn.execute(
             "UPDATE users SET rol=$1 WHERE id=$2", rol, user_id
         )
+    _invalidate_user(user_id)
 
 async def delete_user(user_id):
     pool = await get_pool()
@@ -613,6 +663,7 @@ async def delete_user(user_id):
         await conn.execute(
             "UPDATE users SET faol=FALSE WHERE id=$1", user_id
         )
+    _invalidate_user(user_id)
 
 async def superadmin_bormi():
     pool = await get_pool()
@@ -1399,11 +1450,17 @@ async def get_inventarizatsiya_tarixi(limit=20):
 
 # ── Bot sozlamalari ──
 async def get_bot_setting(kalit):
+    now = time.monotonic()
+    hit = _settings_cache.get(kalit)
+    if hit and now - hit[1] < _SETTINGS_TTL:
+        return hit[0]
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT qiymat FROM bot_settings WHERE kalit=$1", kalit)
-        return row["qiymat"] if row else None
+    val = row["qiymat"] if row else None
+    _settings_cache[kalit] = (val, now)
+    return val
 
 async def set_bot_setting(kalit, qiymat):
     pool = await get_pool()
@@ -1412,6 +1469,7 @@ async def set_bot_setting(kalit, qiymat):
             INSERT INTO bot_settings (kalit, qiymat) VALUES ($1,$2)
             ON CONFLICT (kalit) DO UPDATE SET qiymat=$2
         """, kalit, qiymat)
+    _settings_cache[kalit] = (qiymat, time.monotonic())
 
 # ── Minimum chegara sozlamalari ──
 async def get_settings():
@@ -1454,6 +1512,7 @@ async def update_user_til(user_id: int, til: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET til=$1 WHERE id=$2", til, user_id)
+    _invalidate_user(user_id)
 
 # ── Valyuta kurslari (cache) ──
 async def get_kurs(kod):
@@ -1841,6 +1900,7 @@ async def unblock_user(user_id):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET faol=TRUE WHERE id=$1", user_id)
+    _invalidate_user(user_id)
 
 async def get_blocked_users():
     pool = await get_pool()
@@ -1853,14 +1913,22 @@ async def update_user_ism(user_id, ism):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET ism=$1 WHERE id=$2", ism, user_id)
+    _invalidate_user(user_id)
 
 async def update_user_username(user_id, username):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET username=$1 WHERE id=$2", username, user_id)
+    _invalidate_user(user_id)
 
 async def touch_user(user_id):
+    # Yozuvni cheklaymiz: har bir xabarda emas, eng ko'pi bilan _TOUCH_INTERVAL da bir marta
+    now = time.monotonic()
+    last = _touch_ts.get(user_id)
+    if last is not None and now - last < _TOUCH_INTERVAL:
+        return
+    _touch_ts[user_id] = now
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
