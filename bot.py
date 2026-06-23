@@ -37,7 +37,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # Bot versiyasi
-BOT_VERSION = "2.1.0"
+BOT_VERSION = "2.1.1"
 
 # ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
 _pin_holat = {}

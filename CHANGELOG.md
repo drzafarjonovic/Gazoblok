@@ -1,5 +1,17 @@
 # O'zgarishlar tarixi
 
+## v2.1.1
+
+Qulaylik bo'yicha qo'shimcha yaxshilanishlar va bitta tuzatish (barcha imkoniyatlar saqlangan).
+
+### Yaxshilanishlar
+- **Narx, minimum chegara va formulani tanlab tahrirlash.** Material narxlari, minimum chegaralar va mahsulot formulasi endi hammasini ketma-ket so'ramaydi — kerakli materialni tugmadan tanlab o'zgartirasiz (formuladan olib tashlash ham mumkin).
+- **Foydalanuvchilar, huquqlar va obunachilar — to'liq tugma asosida.** Profil, rol, ism, bloklash/tiklash, superadminlikni o'tkazish, huquqlar va obunachilar endi ID yozish o'rniga ro'yxatdan tanlanadi (xavfli amallarda tasdiqlash bilan).
+- **Menyu ixchamlashtirildi.** Sozlamalar 8 → 5 tugma («⚙️ Tizim sozlamalari» guruhi). Foydalanuvchilar 14 → 7: «👤 Foydalanuvchilar» ro'yxatidan birini tanlasangiz, uning barcha amallari (profil/rol/ism/bloklash/tiklash/superadmin) bitta panelda chiqadi. Audit CSV — audit log ichidagi tugmada.
+
+### Tuzatish
+- 🐞 Profil ko'rishda eski A/B statistikasiga murojaat tufayli yuzaga keladigan xato tuzatildi (v2.0 dinamik modeliga moslandi).
+
 ## v2.1.0
 
 Qulaylik (UX) yangilanishi — barcha imkoniyatlar saqlangan holda ishlatish ancha qulay qilindi.
@@ -11,9 +23,6 @@ Qulaylik (UX) yangilanishi — barcha imkoniyatlar saqlangan holda ishlatish anc
 - **ID/raqam yozish yo'qoldi.** Ombor kirimida material va birlik, shuningdek materialni tahrirlash/o'chirish endi inline tugmalardan tanlanadi — faqat haqiqiy son yoziladi.
 - **O'chirishda tasdiqlash.** Material, blok va shablonni o'chirishda «Ha/Yo'q» so'raladi (tasodifan o'chirib yuborishning oldi olinadi).
 - **Sozlamalar menyusi guruhlandi.** 12 ta tekis tugma o'rniga bo'limlar; «Materiallar» alohida ichki menyuda, «⬅️ Sozlamalar» bilan qaytish.
-- **Narx, minimum chegara va formulani tanlab tahrirlash.** Material narxlari, minimum chegaralar va mahsulot formulasi endi hammasini ketma-ket so'ramaydi — kerakli materialni tugmadan tanlab o'zgartirasiz (formuladan olib tashlash ham mumkin).
-- **Foydalanuvchilar, huquqlar va obunachilar — to'liq tugma asosida.** Profil ko'rish, rol o'zgartirish, ismni o'zgartirish, bloklash/tiklash, superadminlikni o'tkazish, foydalanuvchi huquqlari va hisobot obunachilari endi ID yozish o'rniga ro'yxatdan tanlanadi (xavfli amallarda tasdiqlash bilan). Profil ko'rishdagi xato ham tuzatildi.
-- **Menyu ixchamlashtirildi.** Sozlamalardagi kam ishlatiladigan amallar «⚙️ Tizim sozlamalari» ostiga yig'ildi (8 → 5). Foydalanuvchilar bo'limi 14 tadan 7 tugmaga tushdi: «👤 Foydalanuvchilar» ro'yxatidan birini tanlasangiz, uning barcha amallari (profil/rol/ism/bloklash/tiklash/superadmin) bitta panelda chiqadi.
 - Inline oqimlarda «❌ Bekor» tugmasi va alohida ruxsat tekshiruvi.
 
 ## v2.0.0
