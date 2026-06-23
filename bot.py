@@ -225,14 +225,21 @@ class PermissionMiddleware(BaseMiddleware):
         "🔐 Huquqlar boshqaruvi": "foydalanuvchi_boshqaruv",
     }
 
+    # Til bo'yicha teskari tugma xaritasi keshi: {til: {tarjima: uz_kalit}}
+    _revmap = {}
+
     async def _kanonik_tugma(self, text: str, til: str):
-        """Kelgan matnni TUGMA_PERMISSION dagi kanonik kalitga moslaydi."""
+        """Kelgan matnni TUGMA_PERMISSION dagi kanonik kalitga moslaydi (til-aware, O(1))."""
         if til == "uz":
             return text if text in self.TUGMA_PERMISSION else None
-        for uz in self.TUGMA_PERMISSION:
-            if text == await tarjima_qil(uz, til):
-                return uz
-        return None
+        # Til bo'yicha teskari xarita (bir marta quriladi, keyin O(1) qidiruv)
+        rm = self._revmap.get(til)
+        if rm is None:
+            rm = {}
+            for uz in self.TUGMA_PERMISSION:
+                rm[await tarjima_qil(uz, til)] = uz
+            self._revmap[til] = rm
+        return rm.get(text)
 
     async def __call__(
         self,

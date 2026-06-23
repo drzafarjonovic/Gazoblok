@@ -93,7 +93,6 @@ async def _block_sorov(message, state, mahsulot):
 
 @router.message(SalesState.mahsulot_tanlash)
 async def sotuv_mahsulot(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     if await eq(message, "🏠 Asosiy menyu"):
         await state.clear()
         return
@@ -108,7 +107,6 @@ async def sotuv_mahsulot(message: Message, state: FSMContext):
 
 @router.message(SalesState.block_tanlash)
 async def sotuv_block(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     if await eq(message, "🏠 Asosiy menyu"):
         await state.clear()
         return
@@ -181,7 +179,6 @@ async def oxirgi_sotuv_ochirish(message: Message, state: FSMContext):
 
 @router.message(SalesState.ochirish_mahsulot)
 async def oxirgi_sotuv_tanla(message: Message, state: FSMContext):
-    user_id = message.from_user.id
     if await eq(message, "🏠 Asosiy menyu"):
         await state.clear()
         return

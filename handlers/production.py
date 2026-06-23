@@ -150,7 +150,6 @@ async def shablon_tanlash(message: Message, state: FSMContext):
     data = await state.get_data()
     shablonlar = data.get("shablonlar", [])
     kiritilganlar = data.get("kiritilganlar", {})
-    mahsulot_nomi = data.get("mahsulot_nomi", "")
 
     if await eq(message, "❌ Bekor qilish"):
         await state.clear()

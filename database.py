@@ -173,6 +173,26 @@ _settings_cache = {}  # {kalit: (qiymat|None, ts)}
 _perm_cache = {}      # {uid: (perms_dict, ts, rol)}
 _touch_ts = {}        # {uid: monotonic}
 
+# Mahsulot/blok/shablon TA'RIFLARI keshi (kamdan-kam o'zgaradi).
+# DIQQAT: tayyor mahsulot SONI (finished_goods.qoldiq) bu yerda keshlanMAYDI.
+_STRUCT_TTL = 60.0
+_struct_cache = {}    # {key: (value, ts)}
+
+
+def _struct_get(key):
+    hit = _struct_cache.get(key)
+    if hit and time.monotonic() - hit[1] < _STRUCT_TTL:
+        return hit[0]
+    return None
+
+
+def _struct_put(key, val):
+    _struct_cache[key] = (val, time.monotonic())
+
+
+def _invalidate_struct():
+    _struct_cache.clear()
+
 
 def _invalidate_user(uid):
     _user_cache.pop(uid, None)
@@ -191,6 +211,7 @@ def invalidate_all_caches():
     _settings_cache.clear()
     _perm_cache.clear()
     _touch_ts.clear()
+    _struct_cache.clear()
 
 
 
@@ -752,6 +773,10 @@ async def clear_all_data():
 # MAHSULOTLAR (dinamik)
 # ════════════════════════════════════════════════════════════════════
 async def get_mahsulotlar(faqat_faol=True):
+    key = ("mahsulotlar", faqat_faol)
+    c = _struct_get(key)
+    if c is not None:
+        return c
     pool = await get_pool()
     async with pool.acquire() as conn:
         if faqat_faol:
@@ -759,7 +784,9 @@ async def get_mahsulotlar(faqat_faol=True):
                 "SELECT * FROM mahsulotlar WHERE faol=TRUE ORDER BY tartib, id")
         else:
             rows = await conn.fetch("SELECT * FROM mahsulotlar ORDER BY tartib, id")
-        return [dict(r) for r in rows]
+    res = [dict(r) for r in rows]
+    _struct_put(key, res)
+    return res
 
 async def get_mahsulot(product_id):
     pool = await get_pool()
@@ -778,11 +805,13 @@ async def add_mahsulot(kod, nomi, emoji="📦"):
     async with pool.acquire() as conn:
         tartib = await conn.fetchval(
             "SELECT COALESCE(MAX(tartib),0)+1 FROM mahsulotlar") or 1
-        return await conn.fetchval(
+        pid = await conn.fetchval(
             "INSERT INTO mahsulotlar (kod, nomi, emoji, tartib) "
             "VALUES ($1,$2,$3,$4) RETURNING id",
             kod, nomi, emoji, tartib
         )
+    _invalidate_struct()
+    return pid
 
 async def update_mahsulot(product_id, nomi, emoji):
     pool = await get_pool()
@@ -791,6 +820,7 @@ async def update_mahsulot(product_id, nomi, emoji):
             "UPDATE mahsulotlar SET nomi=$1, emoji=$2 WHERE id=$3",
             nomi, emoji, product_id
         )
+    _invalidate_struct()
 
 async def set_mahsulot_ishchi_haqi(product_id, qiymat):
     pool = await get_pool()
@@ -799,6 +829,7 @@ async def set_mahsulot_ishchi_haqi(product_id, qiymat):
             "UPDATE mahsulotlar SET ishchi_haqi=$1 WHERE id=$2",
             float(qiymat), product_id
         )
+    _invalidate_struct()
 
 async def set_mahsulot_qoshimcha(product_id, qiymat):
     pool = await get_pool()
@@ -807,6 +838,7 @@ async def set_mahsulot_qoshimcha(product_id, qiymat):
             "UPDATE mahsulotlar SET qoshimcha_xarajat=$1 WHERE id=$2",
             float(qiymat), product_id
         )
+    _invalidate_struct()
 
 async def set_mahsulot_faol(product_id, faol):
     pool = await get_pool()
@@ -814,6 +846,7 @@ async def set_mahsulot_faol(product_id, faol):
         await conn.execute(
             "UPDATE mahsulotlar SET faol=$1 WHERE id=$2", bool(faol), product_id
         )
+    _invalidate_struct()
 
 async def delete_mahsulot(product_id):
     """Arxivlash (soft-delete) — tarix saqlanadi."""
@@ -824,13 +857,19 @@ async def delete_mahsulot(product_id):
 # MAHSULOT BLOKLARI
 # ════════════════════════════════════════════════════════════════════
 async def get_bloklar(product_id):
+    key = ("bloklar", product_id)
+    c = _struct_get(key)
+    if c is not None:
+        return c
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM mahsulot_bloklari WHERE product_id=$1 ORDER BY tartib, id",
             product_id
         )
-        return [dict(r) for r in rows]
+    res = [dict(r) for r in rows]
+    _struct_put(key, res)
+    return res
 
 async def get_blok(product_id, kod):
     pool = await get_pool()
@@ -862,13 +901,13 @@ async def add_blok(product_id, kod, nomi, olcham, qolip_dona, sotuv_narx=0):
                 product_id, kod, nomi, olcham, float(qolip_dona),
                 float(sotuv_narx), tartib
             )
-            # Tayyor mahsulot qatorini yaratamiz
             await conn.execute(
                 "INSERT INTO finished_goods (product_id, block_type, qoldiq) "
                 "VALUES ($1,$2,0) ON CONFLICT (product_id, block_type) DO NOTHING",
                 product_id, kod
             )
-            return bid
+    _invalidate_struct()
+    return bid
 
 async def update_blok(blok_id, nomi, olcham, qolip_dona):
     pool = await get_pool()
@@ -877,6 +916,7 @@ async def update_blok(blok_id, nomi, olcham, qolip_dona):
             "UPDATE mahsulot_bloklari SET nomi=$1, olcham=$2, qolip_dona=$3 WHERE id=$4",
             nomi, olcham, float(qolip_dona), blok_id
         )
+    _invalidate_struct()
 
 async def set_blok_sotuv_narx(blok_id, narx):
     pool = await get_pool()
@@ -885,6 +925,7 @@ async def set_blok_sotuv_narx(blok_id, narx):
             "UPDATE mahsulot_bloklari SET sotuv_narx=$1 WHERE id=$2",
             float(narx), blok_id
         )
+    _invalidate_struct()
 
 async def set_blok_override(blok_id, qiymat):
     """qiymat None bo'lsa override o'chadi (avtomatga qaytadi)."""
@@ -897,6 +938,7 @@ async def set_blok_override(blok_id, qiymat):
             await conn.execute(
                 "UPDATE mahsulot_bloklari SET tannarx_override=$1 WHERE id=$2",
                 float(qiymat), blok_id)
+    _invalidate_struct()
 
 async def delete_blok(blok_id):
     pool = await get_pool()
@@ -907,7 +949,6 @@ async def delete_blok(blok_id):
             if not row:
                 return
             pid, kod = row["product_id"], row["kod"]
-            # Shu mahsulot shablonlaridagi chiqim qatorlarini olib tashlaymiz
             await conn.execute(
                 "DELETE FROM shablon_chiqim WHERE block_kod=$1 AND shablon_id IN "
                 "(SELECT id FROM shablonlar WHERE product_id=$2)", kod, pid)
@@ -915,12 +956,17 @@ async def delete_blok(blok_id):
                 "DELETE FROM finished_goods WHERE product_id=$1 AND block_type=$2", pid, kod)
             await conn.execute(
                 "DELETE FROM mahsulot_bloklari WHERE id=$1", blok_id)
+    _invalidate_struct()
 
 
 # ════════════════════════════════════════════════════════════════════
 # SHABLONLAR
 # ════════════════════════════════════════════════════════════════════
 async def get_shablonlar(product_id, faqat_faol=False):
+    key = ("shablonlar", product_id, faqat_faol)
+    c = _struct_get(key)
+    if c is not None:
+        return c
     pool = await get_pool()
     async with pool.acquire() as conn:
         if faqat_faol:
@@ -931,19 +977,26 @@ async def get_shablonlar(product_id, faqat_faol=False):
             rows = await conn.fetch(
                 "SELECT * FROM shablonlar WHERE product_id=$1 ORDER BY tartib, id",
                 product_id)
-        natija = []
-        for r in rows:
-            chiqim = await conn.fetch(
-                "SELECT sc.block_kod, sc.soni, b.nomi AS blok_nomi "
-                "FROM shablon_chiqim sc "
-                "LEFT JOIN mahsulot_bloklari b "
-                "  ON b.product_id=$1 AND b.kod=sc.block_kod "
-                "WHERE sc.shablon_id=$2 ORDER BY sc.id",
-                product_id, r["id"])
-            d = dict(r)
-            d["chiqim"] = [dict(c) for c in chiqim]
-            natija.append(d)
-        return natija
+        # Barcha chiqimlarni BITTA so'rovda olamiz (N+1 oldini olish)
+        chiq = await conn.fetch("""
+            SELECT sc.shablon_id, sc.block_kod, sc.soni, b.nomi AS blok_nomi
+            FROM shablon_chiqim sc
+            LEFT JOIN mahsulot_bloklari b
+                ON b.product_id=$1 AND b.kod=sc.block_kod
+            WHERE sc.shablon_id IN (SELECT id FROM shablonlar WHERE product_id=$1)
+            ORDER BY sc.id
+        """, product_id)
+    by_sh = {}
+    for r in chiq:
+        by_sh.setdefault(r["shablon_id"], []).append(
+            {"block_kod": r["block_kod"], "soni": r["soni"], "blok_nomi": r["blok_nomi"]})
+    res = []
+    for r in rows:
+        d = dict(r)
+        d["chiqim"] = by_sh.get(r["id"], [])
+        res.append(d)
+    _struct_put(key, res)
+    return res
 
 async def get_shablon(shablon_id):
     pool = await get_pool()
@@ -964,11 +1017,13 @@ async def add_shablon(product_id, kod, nomi):
         tartib = await conn.fetchval(
             "SELECT COALESCE(MAX(tartib),0)+1 FROM shablonlar WHERE product_id=$1",
             product_id) or 1
-        return await conn.fetchval(
+        sid = await conn.fetchval(
             "INSERT INTO shablonlar (product_id, kod, nomi, tartib) "
             "VALUES ($1,$2,$3,$4) RETURNING id",
             product_id, kod, nomi, tartib
         )
+    _invalidate_struct()
+    return sid
 
 async def set_shablon_chiqim(shablon_id, chiqim):
     """chiqim: [(block_kod, soni), ...] — eski chiqimni almashtiradi."""
@@ -983,6 +1038,7 @@ async def set_shablon_chiqim(shablon_id, chiqim):
                     "VALUES ($1,$2,$3) ON CONFLICT (shablon_id, block_kod) "
                     "DO UPDATE SET soni=$3",
                     shablon_id, bk, int(soni))
+    _invalidate_struct()
 
 async def delete_shablon(shablon_id):
     pool = await get_pool()
@@ -991,6 +1047,7 @@ async def delete_shablon(shablon_id):
             await conn.execute(
                 "DELETE FROM shablon_chiqim WHERE shablon_id=$1", shablon_id)
             await conn.execute("DELETE FROM shablonlar WHERE id=$1", shablon_id)
+    _invalidate_struct()
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1314,34 +1371,29 @@ async def get_production_today(product_id):
     bugun = bugungi_sana().isoformat()
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT p.shablon_id, s.nomi AS shablon_nomi,
+        srows = await conn.fetch("""
+            SELECT s.nomi AS shablon_nomi, s.tartib AS tartib,
                    COALESCE(SUM(p.qolip_soni),0) AS qty
             FROM production_log p
             LEFT JOIN shablonlar s ON p.shablon_id=s.id
             WHERE p.product_id=$1 AND p.sana=$2
-            GROUP BY p.shablon_id, s.nomi
+            GROUP BY s.nomi, s.tartib
+            ORDER BY s.tartib
         """, product_id, bugun)
-        jami_qolip = 0
-        shablonlar = []
-        blok_jami = {}
-        for r in rows:
-            qty = int(r["qty"])
-            jami_qolip += qty
-            shablonlar.append({"nomi": r["shablon_nomi"] or "?", "soni": qty})
-            chiqim = await _shablon_bloklari(conn, r["shablon_id"], qty)
-            for kod, n in chiqim.items():
-                blok_jami[kod] = blok_jami.get(kod, 0) + n
-        # Blok nomlari
-        blok_nomlari = {}
-        for b in await conn.fetch(
-                "SELECT kod, nomi FROM mahsulot_bloklari WHERE product_id=$1", product_id):
-            blok_nomlari[b["kod"]] = b["nomi"]
-        return {
-            "jami_qolip": jami_qolip,
-            "shablonlar": shablonlar,
-            "bloklar": {blok_nomlari.get(k, k): v for k, v in blok_jami.items()},
-        }
+        brows = await conn.fetch("""
+            SELECT b.nomi AS blok_nomi, sc.block_kod AS kod,
+                   COALESCE(SUM(sc.soni * p.qolip_soni),0) AS soni
+            FROM production_log p
+            JOIN shablon_chiqim sc ON sc.shablon_id = p.shablon_id
+            LEFT JOIN mahsulot_bloklari b
+                ON b.product_id = p.product_id AND b.kod = sc.block_kod
+            WHERE p.product_id=$1 AND p.sana=$2
+            GROUP BY b.nomi, sc.block_kod
+        """, product_id, bugun)
+    jami_qolip = sum(int(r["qty"]) for r in srows)
+    shablonlar = [{"nomi": r["shablon_nomi"] or "?", "soni": int(r["qty"])} for r in srows]
+    bloklar = {(r["blok_nomi"] or r["kod"]): int(r["soni"]) for r in brows}
+    return {"jami_qolip": jami_qolip, "shablonlar": shablonlar, "bloklar": bloklar}
 
 
 
