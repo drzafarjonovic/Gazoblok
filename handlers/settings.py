@@ -193,53 +193,49 @@ async def materiallar_royxati(message: Message):
 
 
 # ── Materialni tahrirlash ──
+async def _material_inline(prefix):
+    """Materiallar ro'yxati inline tugmalar sifatida."""
+    materials = await db.get_materials()
+    kb = []
+    for m in materials:
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        kb.append([InlineKeyboardButton(
+            text=f"{m[1]} — {qoldiq_asl:.0f} {m[4]}",
+            callback_data=f"{prefix}:{m[0]}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb), materials
+
+
 @router.message(Tkey("✏️ Materialni tahrirlash"))
 async def material_tahrirlash(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
         return
-    try:
-        await state.clear()
-        materials = await db.get_materials()
-        if not materials:
-            await say(
-                message,
-                "❌ Hali material kiritilmagan!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
-            )
-            return
-        text = "✏️ Qaysi materialni tahrirlash?\nRaqamini kiriting:\n\n"
-        for m in materials:
-            qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
-            text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
-        await state.update_data(materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials])
-        await state.set_state(MaterialEditState.material_id)
-        await say(message, text)
-    except Exception as e:
-        await say_error(message, e)
+    await state.clear()
+    kb, materials = await _material_inline("matedit")
+    if not materials:
+        await say(message, "❌ Hali material kiritilmagan!",
+                  reply_markup=await sozlamalar_menu(message.from_user.id))
+        return
+    await say(message, "✏️ Qaysi materialni tahrirlash?", reply_markup=kb)
 
 
-@router.message(MaterialEditState.material_id)
-async def material_tahrirlash_id(message: Message, state: FSMContext):
+@router.callback_query(lambda c: c.data and c.data.startswith("matedit:"))
+async def matedit_cb(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    material_id = int(callback.data.split(":", 1)[1])
+    materials = await db.get_materials()
+    material = next((m for m in materials if m[0] == material_id), None)
+    if not material:
+        await callback.answer("❌ Topilmadi", show_alert=True)
+        return
+    await state.update_data(material_id=material_id, eski_nomi=material[1])
+    await state.set_state(MaterialEditState.nomi)
     try:
-        material_id = int(message.text.strip())
-        data = await state.get_data()
-        materials = data["materials"]
-        material = next((m for m in materials if m[0] == material_id), None)
-        if not material:
-            await say(message, "❌ Bunday raqam yo'q! Qaytadan kiriting.")
-            return
-        await state.update_data(
-            material_id=material_id,
-            eski_nomi=material[1]
-        )
-        await state.set_state(MaterialEditState.nomi)
-        await say(
-            message,
-            f"Yangi nom kiriting:\n"
-            f"(Hozirgi: {material[1]})"
-        )
-    except ValueError:
-        await say(message, "❌ Faqat raqam kiriting!")
+        await callback.message.edit_text(await t(
+            f"✏️ {material[1]}\nYangi nomni kiriting:", callback.from_user.id))
+    except Exception:
+        pass
+    await callback.answer()
 
 
 @router.message(MaterialEditState.nomi)
@@ -310,64 +306,70 @@ async def material_tahrirlash_birlik(message: Message, state: FSMContext):
 async def material_ochirish(message: Message, state: FSMContext):
     if not await _faqat_superadmin(message):
         return
-    try:
-        await state.clear()
-        materials = await db.get_materials()
-        if not materials:
-            await say(
-                message,
-                "❌ Hali material kiritilmagan!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
-            )
-            return
-        text = "🗑️ Qaysi materialni o'chirish?\nRaqamini kiriting:\n\n"
-        for m in materials:
-            qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
-            text += f"{m[0]}. {m[1]} — {qoldiq_asl:.2f} {m[4]}\n"
-        await state.update_data(
-            materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials]
-        )
-        await state.set_state(MaterialDeleteState.material_id)
-        await say(message, text)
-    except Exception as e:
-        await say_error(message, e)
+    await state.clear()
+    kb, materials = await _material_inline("matdel")
+    if not materials:
+        await say(message, "❌ Hali material kiritilmagan!",
+                  reply_markup=await sozlamalar_menu(message.from_user.id))
+        return
+    await say(message, "🗑️ Qaysi materialni o'chirish?", reply_markup=kb)
 
 
-@router.message(MaterialDeleteState.material_id)
-async def material_ochirish_id(message: Message, state: FSMContext):
+@router.callback_query(lambda c: c.data and c.data.startswith("matdel:"))
+async def matdel_cb(callback: CallbackQuery):
+    if not await _cb_ok(callback):
+        return
+    mid = int(callback.data.split(":", 1)[1])
+    materials = await db.get_materials()
+    material = next((m for m in materials if m[0] == mid), None)
+    if not material:
+        await callback.answer("❌ Topilmadi", show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"matdelok:{mid}"),
+        InlineKeyboardButton(text="❌ Yo'q", callback_data="matdelno"),
+    ]])
     try:
-        material_id = int(message.text.strip())
-        data = await state.get_data()
-        materials = data["materials"]
-        material = next((m for m in materials if m[0] == material_id), None)
-        if not material:
-            await say(message, "❌ Bunday raqam yo'q!")
-            await state.clear()
-            return
-        await db.delete_material(material_id)
-        user = await db.get_user(message.from_user.id)
+        await callback.message.edit_text(await t(
+            f"🗑️ '{material[1]}' o'chirilsinmi?\n"
+            f"(Formuladagi ishlatilishi ham olib tashlanadi)", callback.from_user.id),
+            reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "matdelno")
+async def matdelno_cb(callback: CallbackQuery):
+    try:
+        await callback.message.edit_text(await t("❌ Bekor qilindi.", callback.from_user.id))
+    except Exception:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("matdelok:"))
+async def matdelok_cb(callback: CallbackQuery):
+    if not await _cb_ok(callback):
+        return
+    mid = int(callback.data.split(":", 1)[1])
+    materials = await db.get_materials()
+    material = next((m for m in materials if m[0] == mid), None)
+    if material:
+        await db.delete_material(mid)
+        user = await db.get_user(callback.from_user.id)
         await db.add_audit_log(
-            message.from_user.id,
-            user["ism"] if user else str(message.from_user.id),
-            user["rol"] if user else "-",
-            "Material o'chirildi",
-            f"{material[1]} o'chirildi"
-        )
-        await state.clear()
-        await say(
-            message,
-            f"✅ {material[1]} o'chirildi!",
-            reply_markup=await sozlamalar_menu(message.from_user.id)
-        )
-    except ValueError:
-        await say(message, "❌ Faqat raqam kiriting!")
-        await state.clear()
-    except Exception as e:
-        await state.clear()
-        await say_error(
-            message, e,
-            reply_markup=await sozlamalar_menu(message.from_user.id)
-        )
+            callback.from_user.id, user["ism"] if user else "-",
+            user["rol"] if user else "-", "Material o'chirildi",
+            f"{material[1]} o'chirildi")
+        msg = await t(f"✅ {material[1]} o'chirildi!", callback.from_user.id)
+    else:
+        msg = await t("❌ Material topilmadi.", callback.from_user.id)
+    try:
+        await callback.message.edit_text(msg)
+    except Exception:
+        pass
+    await callback.answer()
 
 
 # (Eski global "Qolip formulasi" olib tashlandi — endi har mahsulot uchun
@@ -1093,6 +1095,21 @@ async def mb_callback(callback: CallbackQuery, state: FSMContext):
 
     if action == "mb_blkdel":
         blok = await db.get_blok_by_id(aid)
+        if not blok:
+            await callback.answer("❌", show_alert=True)
+            return
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"mb_blkdelok:{aid}"),
+            InlineKeyboardButton(text="⬅️ Yo'q", callback_data=f"mb_blk:{blok['product_id']}"),
+        ]])
+        await callback.message.edit_text(
+            await t(f"🗑 '{blok['nomi']}' blokini o'chirasizmi?", callback.from_user.id),
+            reply_markup=kb)
+        await callback.answer()
+        return
+
+    if action == "mb_blkdelok":
+        blok = await db.get_blok_by_id(aid)
         pid = blok["product_id"] if blok else None
         await db.delete_blok(aid)
         if pid:
@@ -1102,6 +1119,21 @@ async def mb_callback(callback: CallbackQuery, state: FSMContext):
         return
 
     if action == "mb_shbdel":
+        sh = await db.get_shablon(aid)
+        if not sh:
+            await callback.answer("❌", show_alert=True)
+            return
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Ha, o'chirish", callback_data=f"mb_shbdelok:{aid}"),
+            InlineKeyboardButton(text="⬅️ Yo'q", callback_data=f"mb_shb:{sh['product_id']}"),
+        ]])
+        await callback.message.edit_text(
+            await t(f"🗑 '{sh['nomi']}' shablonini o'chirasizmi?", callback.from_user.id),
+            reply_markup=kb)
+        await callback.answer()
+        return
+
+    if action == "mb_shbdelok":
         sh = await db.get_shablon(aid)
         pid = sh["product_id"] if sh else None
         await db.delete_shablon(aid)
