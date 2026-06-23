@@ -6,6 +6,7 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import timedelta, timezone, datetime
+import asyncio
 import io
 import csv
 import openpyxl
@@ -202,11 +203,13 @@ async def tayyor_holati(product_id=None):
 # ── Hisobot matnlari ──
 async def hisobot_matni(boshliq, oxiri, sarlavha, product_id=None):
     try:
-        qol = await db.get_production_qolip_range(boshliq, oxiri, product_id)
-        pblk = await db.get_production_blocks_range(boshliq, oxiri, product_id)
-        sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
-        ombor = await ombor_holati()
-        tayyor = await tayyor_holati(product_id)
+        qol, pblk, sblk, ombor, tayyor = await asyncio.gather(
+            db.get_production_qolip_range(boshliq, oxiri, product_id),
+            db.get_production_blocks_range(boshliq, oxiri, product_id),
+            db.get_sales_blocks_range(boshliq, oxiri, product_id),
+            ombor_holati(),
+            tayyor_holati(product_id),
+        )
 
         text = (f"{sarlavha}\n📅 {boshliq} — {oxiri}\n"
                 f"━━━━━━━━━━━━━━━━\n\n🏭 Ishlab chiqarish:\n")
@@ -274,15 +277,18 @@ async def gen_tafsil(boshliq, oxiri, sarlavha, product_id=None):
 
 
 async def gen_moliya(boshliq, oxiri, sarlavha, product_id=None):
-    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
-    tannarx, sotuv = await _narx_maps()
+    sblk, narx, xom, goods = await asyncio.gather(
+        db.get_sales_blocks_range(boshliq, oxiri, product_id),
+        _narx_maps(),
+        db.ombor_xom_qiymati(),
+        db.get_all_finished_goods(),
+    )
+    tannarx, sotuv = narx
     daromad = sum(x["rev"] for x in sblk)
     cogs = sum(x["qty"] * tannarx.get((x["product_id"], x["kod"]), 0) for x in sblk)
     foyda = daromad - cogs
     foyda_foiz = (foyda / daromad * 100) if daromad > 0 else 0.0
 
-    xom = await db.ombor_xom_qiymati()
-    goods = await db.get_all_finished_goods()
     if product_id:
         goods = [g for g in goods if g["product_id"] == product_id]
     tayyor_tannarx = sum(g["qoldiq"] * tannarx.get((g["product_id"], g["kod"]), 0) for g in goods)
@@ -332,10 +338,13 @@ async def gen_ishchi(boshliq, oxiri, sarlavha, product_id=None):
 
 
 async def _metrikalar(boshliq, oxiri, product_id=None):
-    qol = await db.get_production_qolip_range(boshliq, oxiri, product_id)
+    qol, sblk, narx = await asyncio.gather(
+        db.get_production_qolip_range(boshliq, oxiri, product_id),
+        db.get_sales_blocks_range(boshliq, oxiri, product_id),
+        _narx_maps(),
+    )
+    tannarx, _ = narx
     jami_qolip = sum(v["qolip"] for v in qol.values())
-    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
-    tannarx, _ = await _narx_maps()
     daromad = sum(x["rev"] for x in sblk)
     sotildi = sum(x["qty"] for x in sblk)
     cogs = sum(x["qty"] * tannarx.get((x["product_id"], x["kod"]), 0) for x in sblk)
@@ -376,16 +385,19 @@ async def gen_material(boshliq, oxiri, sarlavha, product_id=None):
 
 # ── Excel ──
 async def _excel_yubor(target, user_id, boshliq, oxiri, product_id=None):
-    pblk = await db.get_production_blocks_range(boshliq, oxiri, product_id)
-    qol = await db.get_production_qolip_range(boshliq, oxiri, product_id)
-    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
-    materials = await db.get_materials()
-    goods = await db.get_all_finished_goods()
+    pblk, qol, sblk, materials, goods, audit_logs, chiqim, narx = await asyncio.gather(
+        db.get_production_blocks_range(boshliq, oxiri, product_id),
+        db.get_production_qolip_range(boshliq, oxiri, product_id),
+        db.get_sales_blocks_range(boshliq, oxiri, product_id),
+        db.get_materials(),
+        db.get_all_finished_goods(),
+        db.get_audit_log(200),
+        db.get_material_sarfi(boshliq, oxiri, product_id),
+        _narx_maps(),
+    )
+    tannarx, sotuv = narx
     if product_id:
         goods = [g for g in goods if g["product_id"] == product_id]
-    audit_logs = await db.get_audit_log(200)
-    chiqim = await db.get_material_sarfi(boshliq, oxiri, product_id)
-    tannarx, sotuv = await _narx_maps()
 
     wb = openpyxl.Workbook()
     sarlavha_font = Font(bold=True, size=11, color="FFFFFF")

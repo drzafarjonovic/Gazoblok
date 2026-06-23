@@ -2,6 +2,7 @@ from aiogram import Router
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+import asyncio
 import database as db
 from translation import (
     Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil,
@@ -220,8 +221,8 @@ async def bugungi_sotuv(message: Message):
         return
     text = "📋 Bugungi sotuv:\n"
     bor = False
-    for p in prods:
-        info = await db.get_sales_today(p["id"])
+    infos = await asyncio.gather(*(db.get_sales_today(p["id"]) for p in prods))
+    for p, info in zip(prods, infos):
         if info["jami"] <= 0:
             continue
         bor = True

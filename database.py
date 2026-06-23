@@ -469,6 +469,25 @@ async def init_db():
             )
         """)
 
+        # ── Indekslar (hisobot/sana so'rovlarini tezlashtirish, idempotent) ──
+        for idx_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_prod_prod_sana ON production_log(product_id, sana)",
+            "CREATE INDEX IF NOT EXISTS idx_prod_sana ON production_log(sana)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_prod_sana ON sales_log(product_id, sana)",
+            "CREATE INDEX IF NOT EXISTS idx_sales_sana ON sales_log(sana)",
+            "CREATE INDEX IF NOT EXISTS idx_chiqim_sana ON material_chiqim_log(sana)",
+            "CREATE INDEX IF NOT EXISTS idx_chiqim_prodlog ON material_chiqim_log(production_log_id)",
+            "CREATE INDEX IF NOT EXISTS idx_chiqim_prod ON material_chiqim_log(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_qolip_prod ON qolip_formula(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_bloklar_prod ON mahsulot_bloklari(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_shablon_prod ON shablonlar(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_shchiqim_sh ON shablon_chiqim(shablon_id)",
+            "CREATE INDEX IF NOT EXISTS idx_inv_prod ON inventarizatsiya(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_userperm_uid ON user_permissions(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_audit_vaqt ON audit_log(vaqt)",
+        ):
+            await conn.execute(idx_sql)
+
         # Eski gazoblok ma'lumotlarini dinamik modelga ko'chirish
         await _migrate_to_dynamic(conn)
 
@@ -752,6 +771,7 @@ async def delete_material(material_id):
         await conn.execute("DELETE FROM qolip_formula WHERE material_id=$1", material_id)
         await conn.execute("DELETE FROM settings WHERE material_id=$1", material_id)
         await conn.execute("DELETE FROM materials WHERE id=$1", material_id)
+    _invalidate_struct()
 
 async def clear_all_data():
     """Tranzaksion ma'lumotlarni tozalaydi (mahsulot/blok/shablon ta'riflari saqlanadi)."""
@@ -1129,11 +1149,13 @@ async def add_qolip_formula(product_id, material_id, miqdor, birlik):
             "VALUES ($1,$2,$3,$4,$5)",
             product_id, material_id, miqdor, birlik, miqdor_asosiy
         )
+    _invalidate_struct()
 
 async def clear_qolip_formula(product_id):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM qolip_formula WHERE product_id=$1", product_id)
+    _invalidate_struct()
 
 async def check_material_yetarli(product_id, jami_qolip):
     formula = await get_qolip_formula(product_id)
@@ -1595,6 +1617,7 @@ async def set_material_narx(material_id, narx_asosiy):
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE materials SET narx=$1 WHERE id=$2", float(narx_asosiy), material_id)
+    _invalidate_struct()  # tannarx_map material narxiga bog'liq
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1649,13 +1672,39 @@ async def tannarx_hisobla(product_id):
 
 
 async def get_block_tannarx_map():
-    """{(product_id, block_kod): tannarx_uzs} — barcha mahsulotlar bo'yicha (COGS uchun)."""
+    """{(product_id, block_kod): tannarx_uzs} — barcha mahsulotlar (COGS uchun).
+    To'plamli so'rovlar + struktura keshi (narx/struktura o'zgarsa invalidatsiya)."""
+    cached = _struct_get(("tannarx_map",))
+    if cached is not None:
+        return dict(cached)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        mat_rows = await conn.fetch("""
+            SELECT q.product_id,
+                   COALESCE(SUM(q.miqdor_asosiy * COALESCE(m.narx, 0)), 0) AS mat
+            FROM qolip_formula q
+            JOIN materials m ON q.material_id = m.id
+            GROUP BY q.product_id
+        """)
+        prod_rows = await conn.fetch(
+            "SELECT id, ishchi_haqi, qoshimcha_xarajat FROM mahsulotlar")
+        blk_rows = await conn.fetch(
+            "SELECT product_id, kod, qolip_dona, tannarx_override FROM mahsulot_bloklari")
+    mat = {r["product_id"]: float(r["mat"]) for r in mat_rows}
+    qolip = {}
+    for r in prod_rows:
+        qolip[r["id"]] = (mat.get(r["id"], 0.0)
+                          + float(r["ishchi_haqi"] or 0)
+                          + float(r["qoshimcha_xarajat"] or 0))
     natija = {}
-    for m in await get_mahsulotlar(faqat_faol=False):
-        ti = await tannarx_hisobla(m["id"])
-        for b in ti["bloklar"]:
-            natija[(m["id"], b["kod"])] = b["final"]
-    return natija
+    for b in blk_rows:
+        pid = b["product_id"]
+        dona = b["qolip_dona"] or 0
+        auto = (qolip.get(pid, 0.0) / dona) if dona else 0.0
+        over = b["tannarx_override"]
+        natija[(pid, b["kod"])] = float(over) if over is not None else auto
+    _struct_put(("tannarx_map",), natija)
+    return dict(natija)
 
 
 

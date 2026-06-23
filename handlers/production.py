@@ -2,6 +2,7 @@ from aiogram import Router
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+import asyncio
 import database as db
 from translation import (
     Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil,
@@ -260,8 +261,8 @@ async def bugungi_production(message: Message):
         return
     bloklar_bor = False
     text = "📋 Bugungi ishlab chiqarish:\n"
-    for p in prods:
-        info = await db.get_production_today(p["id"])
+    infos = await asyncio.gather(*(db.get_production_today(p["id"]) for p in prods))
+    for p, info in zip(prods, infos):
         if info["jami_qolip"] <= 0:
             continue
         bloklar_bor = True
