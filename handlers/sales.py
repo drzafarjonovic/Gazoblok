@@ -1,22 +1,20 @@
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, eq, canon, say, say_error, build_keyboard
+from translation import (
+    Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil,
+)
 
 router = Router()
 
-# Blok turi tugmalari (kanonik o'zbekcha)
-BLOCK_BUTTONS = {
-    "A blok (60×20×30)": "A",
-    "B blok (60×10×30)": "B",
-}
-
 
 class SalesState(StatesGroup):
-    block_type = State()
+    mahsulot_tanlash = State()
+    block_tanlash = State()
     miqdor = State()
+    ochirish_mahsulot = State()
 
 
 async def sales_menu(user_id):
@@ -28,179 +26,212 @@ async def sales_menu(user_id):
     ])
 
 
-async def block_type_menu(user_id):
-    return await build_keyboard(user_id, [
-        ["A blok (60×20×30)"],
-        ["B blok (60×10×30)"],
-        ["🏠 Asosiy menyu"],
-    ])
+async def _kb(user_id, dinamik_rows, static_rows):
+    til = await foydalanuvchi_tili(user_id)
+    kb = []
+    for row in dinamik_rows:
+        kb.append([KeyboardButton(text=s) for s in row])
+    for row in static_rows:
+        kb.append([KeyboardButton(text=(s if til == "uz" else await tarjima_qil(s, til)))
+                   for s in row])
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+
+def _label(p):
+    return f"{p['emoji']} {p['nomi']}"
+
+
+async def _mahsulot_keyboard(user_id):
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    rows = [[_label(p)] for p in prods]
+    return await _kb(user_id, rows, [["🏠 Asosiy menyu"]]), prods
+
+
+async def _block_keyboard(user_id, bloklar):
+    rows = [[b["nomi"]] for b in bloklar]
+    return await _kb(user_id, rows, [["🏠 Asosiy menyu"]])
 
 
 @router.message(Tkey("💰 Sotuv"))
 async def sotuv(message: Message):
-    await say(
-        message,
-        "💰 Sotuv bo'limi:",
-        reply_markup=await sales_menu(message.from_user.id)
-    )
+    await say(message, "💰 Sotuv bo'limi:", reply_markup=await sales_menu(message.from_user.id))
 
 
 @router.message(Tkey("💰 Sotuv kiritish"))
 async def sotuv_kiritish(message: Message, state: FSMContext):
-    try:
-        goods = await db.get_finished_goods()
-        text = "Qaysi blok sotildi?\n\n"
-        text += "📦 Joriy tayyor mahsulot:\n"
-        for g in goods:
-            text += f"   {g[0]} blok: {g[1]} ta\n"
-        await state.set_state(SalesState.block_type)
-        await say(message, text, reply_markup=await block_type_menu(message.from_user.id))
-    except Exception as e:
-        await say_error(message, e, reply_markup=await sales_menu(message.from_user.id))
+    user_id = message.from_user.id
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    if not prods:
+        await say(message, "❌ Mahsulot yo'q.", reply_markup=await sales_menu(user_id))
+        return
+    await state.clear()
+    if len(prods) == 1:
+        await _block_sorov(message, state, prods[0])
+        return
+    kb, _ = await _mahsulot_keyboard(user_id)
+    await state.set_state(SalesState.mahsulot_tanlash)
+    await say(message, "📦 Qaysi mahsulot sotildi?", reply_markup=kb)
 
 
-@router.message(SalesState.block_type)
-async def sotuv_block_type(message: Message, state: FSMContext):
+async def _block_sorov(message, state, mahsulot):
+    user_id = message.from_user.id
+    pid = mahsulot["id"]
+    bloklar = await db.get_finished_goods(pid)
+    if not bloklar:
+        await state.clear()
+        await say(message, f"❌ '{mahsulot['nomi']}' uchun blok turi yo'q!",
+                  reply_markup=await sales_menu(user_id))
+        return
+    await state.update_data(pid=pid, mahsulot_nomi=mahsulot["nomi"], bloklar=bloklar)
+    await state.set_state(SalesState.block_tanlash)
+    text = f"📦 {mahsulot['nomi']} — joriy tayyor mahsulot:\n"
+    for b in bloklar:
+        text += f"   {b['nomi']}: {b['qoldiq']} ta\n"
+    text += "\nQaysi blok sotildi?"
+    await say(message, text, reply_markup=await _block_keyboard(user_id, bloklar))
+
+
+@router.message(SalesState.mahsulot_tanlash)
+async def sotuv_mahsulot(message: Message, state: FSMContext):
+    user_id = message.from_user.id
     if await eq(message, "🏠 Asosiy menyu"):
         await state.clear()
         return
-    uz = await canon(message, list(BLOCK_BUTTONS.keys()))
-    if not uz:
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    text = (message.text or "").strip()
+    tanlangan = next((p for p in prods if _label(p) == text), None)
+    if not tanlangan:
         await say(message, "❌ Tugmalardan birini tanlang!")
         return
-    block_type = BLOCK_BUTTONS[uz]
-    await state.update_data(block_type=block_type)
-    await state.set_state(SalesState.miqdor)
+    await _block_sorov(message, state, tanlangan)
 
-    goods = await db.get_finished_goods()
-    qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
-    await say(
-        message,
-        f"📦 {block_type} blokdan nechta sotildi?\n"
-        f"Mavjud: {qoldiq} ta\n\n"
-        f"Misol: 100"
-    )
+
+@router.message(SalesState.block_tanlash)
+async def sotuv_block(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if await eq(message, "🏠 Asosiy menyu"):
+        await state.clear()
+        return
+    data = await state.get_data()
+    bloklar = data.get("bloklar", [])
+    text = (message.text or "").strip()
+    tanlangan = next((b for b in bloklar if b["nomi"] == text), None)
+    if not tanlangan:
+        await say(message, "❌ Tugmalardan birini tanlang!")
+        return
+    await state.update_data(block_kod=tanlangan["kod"], block_nomi=tanlangan["nomi"])
+    await state.set_state(SalesState.miqdor)
+    await say(message,
+              f"📦 {tanlangan['nomi']} dan nechta sotildi?\n"
+              f"Mavjud: {tanlangan['qoldiq']} ta\n\nMisol: 100")
 
 
 @router.message(SalesState.miqdor)
 async def sotuv_miqdor(message: Message, state: FSMContext):
+    user_id = message.from_user.id
     try:
         miqdor = int(message.text.strip())
         if miqdor <= 0:
             raise ValueError
-        data = await state.get_data()
-        block_type = data["block_type"]
-        bugun = db.bugungi_sana()
-        user_id = message.from_user.id
-
-        muvaffaqiyat, xabar = await db.add_sales_log(
-            bugun, block_type, miqdor, user_id
-        )
-
-        await state.clear()
-
-        if not muvaffaqiyat:
-            await say(message, xabar, reply_markup=await sales_menu(user_id))
-            return
-
-        # Audit log
-        user = await db.get_user(user_id)
-        await db.add_audit_log(
-            user_id,
-            user["ism"] if user else str(user_id),
-            user["rol"] if user else "-",
-            "Sotuv kiritildi",
-            f"{block_type} blok: {miqdor} ta sotildi"
-        )
-
-        # Yangilangan qoldiq
-        goods = await db.get_finished_goods()
-        yangi_qoldiq = next((g[1] for g in goods if g[0] == block_type), 0)
-
-        await say(
-            message,
-            f"✅ Sotuv kiritildi!\n\n"
-            f"🧱 {block_type} blok: {miqdor} ta sotildi\n"
-            f"📦 Qoldi: {yangi_qoldiq} ta",
-            reply_markup=await sales_menu(user_id)
-        )
-    except ValueError:
+    except (ValueError, AttributeError):
         await say(message, "❌ Faqat musbat son kiriting! Misol: 100")
-    except Exception as e:
-        await state.clear()
-        await say_error(
-            message, e,
-            reply_markup=await sales_menu(message.from_user.id)
-        )
+        return
+
+    data = await state.get_data()
+    pid = data["pid"]
+    block_kod = data["block_kod"]
+    block_nomi = data.get("block_nomi", block_kod)
+
+    muvaffaqiyat, xabar = await db.add_sales_log(pid, block_kod, miqdor, user_id)
+    await state.clear()
+    if not muvaffaqiyat:
+        await say(message, xabar, reply_markup=await sales_menu(user_id))
+        return
+
+    user = await db.get_user(user_id)
+    await db.add_audit_log(
+        user_id, user["ism"] if user else str(user_id),
+        user["rol"] if user else "-", "Sotuv kiritildi",
+        f"{data.get('mahsulot_nomi','')} | {block_nomi}: {miqdor} ta")
+
+    bloklar = await db.get_finished_goods(pid)
+    yangi_qoldiq = next((b["qoldiq"] for b in bloklar if b["kod"] == block_kod), 0)
+    await say(message,
+              f"✅ Sotuv kiritildi!\n\n"
+              f"🧱 {block_nomi}: {miqdor} ta sotildi\n"
+              f"📦 Qoldi: {yangi_qoldiq} ta",
+              reply_markup=await sales_menu(user_id))
 
 
-# ── Oxirgi sotuvni o'chirish ──
 @router.message(Tkey("🗑️ Oxirgi sotuvni o'chirish"))
-async def oxirgi_sotuv_ochirish(message: Message):
+async def oxirgi_sotuv_ochirish(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    if not prods:
+        await say(message, "❌ Mahsulot yo'q.", reply_markup=await sales_menu(user_id))
+        return
+    await state.clear()
+    if len(prods) == 1:
+        await _sotuv_ochir(message, prods[0]["id"])
+        return
+    kb, _ = await _mahsulot_keyboard(user_id)
+    await state.set_state(SalesState.ochirish_mahsulot)
+    await say(message, "📦 Qaysi mahsulotning oxirgi sotuvini o'chirasiz?", reply_markup=kb)
+
+
+@router.message(SalesState.ochirish_mahsulot)
+async def oxirgi_sotuv_tanla(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if await eq(message, "🏠 Asosiy menyu"):
+        await state.clear()
+        return
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    text = (message.text or "").strip()
+    tanlangan = next((p for p in prods if _label(p) == text), None)
+    if not tanlangan:
+        await say(message, "❌ Tugmalardan birini tanlang!")
+        return
+    await state.clear()
+    await _sotuv_ochir(message, tanlangan["id"])
+
+
+async def _sotuv_ochir(message, pid):
+    user_id = message.from_user.id
     try:
-        user = await db.get_user(message.from_user.id)
-        natija = await db.delete_last_sale()
+        user = await db.get_user(user_id)
+        natija = await db.delete_last_sale(pid)
         if natija:
             await db.add_audit_log(
-                message.from_user.id,
-                user["ism"] if user else str(message.from_user.id),
-                user["rol"] if user else "-",
-                "Sotuv o'chirildi",
-                "Oxirgi sotuv yozuvi o'chirildi va omborga qaytarildi"
-            )
-            await say(
-                message,
-                "✅ Oxirgi sotuv o'chirildi!\n"
-                "📦 Mahsulot omborga qaytarildi.",
-                reply_markup=await sales_menu(message.from_user.id)
-            )
+                user_id, user["ism"] if user else str(user_id),
+                user["rol"] if user else "-", "Sotuv o'chirildi",
+                "Oxirgi sotuv yozuvi o'chirildi va omborga qaytarildi")
+            await say(message, "✅ Oxirgi sotuv o'chirildi!\n📦 Mahsulot omborga qaytarildi.",
+                      reply_markup=await sales_menu(user_id))
         else:
-            await say(
-                message,
-                "❌ O'chiriladigan yozuv yo'q!",
-                reply_markup=await sales_menu(message.from_user.id)
-            )
+            await say(message, "❌ O'chiriladigan yozuv yo'q!",
+                      reply_markup=await sales_menu(user_id))
     except Exception as e:
-        await say_error(
-            message, e,
-            reply_markup=await sales_menu(message.from_user.id)
-        )
+        await say_error(message, e, reply_markup=await sales_menu(user_id))
 
 
-# ── Bugungi sotuv ──
 @router.message(Tkey("📋 Bugungi sotuv"))
 async def bugungi_sotuv(message: Message):
-    try:
-        bugun = db.bugungi_sana()
-        logs = await db.get_sales_by_date(bugun)
-
-        if not logs:
-            await say(
-                message,
-                "📋 Bugun hali sotuv kiritilmagan.",
-                reply_markup=await sales_menu(message.from_user.id)
-            )
-            return
-
-        A_jami = sum(log[1] for log in logs if log[0] == "A")
-        B_jami = sum(log[1] for log in logs if log[0] == "B")
-
-        goods = await db.get_finished_goods()
-        qoldiq_text = ""
-        for g in goods:
-            qoldiq_text += f"   {g[0]} blok: {g[1]} ta\n"
-
-        text = (
-            f"📋 Bugungi sotuv:\n\n"
-            f"🧱 A blok: {A_jami} ta\n"
-            f"🧱 B blok: {B_jami} ta\n"
-            f"📦 Jami sotildi: {A_jami + B_jami} ta\n\n"
-            f"🏬 Tayyor mahsulot qoldig'i:\n"
-            f"{qoldiq_text}"
-        )
-        await say(message, text, reply_markup=await sales_menu(message.from_user.id))
-    except Exception as e:
-        await say_error(
-            message, e,
-            reply_markup=await sales_menu(message.from_user.id)
-        )
+    user_id = message.from_user.id
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    if not prods:
+        await say(message, "❌ Mahsulot yo'q.", reply_markup=await sales_menu(user_id))
+        return
+    text = "📋 Bugungi sotuv:\n"
+    bor = False
+    for p in prods:
+        info = await db.get_sales_today(p["id"])
+        if info["jami"] <= 0:
+            continue
+        bor = True
+        text += f"\n💰 {p['emoji']} {p['nomi']}\n"
+        for b in info["bloklar"]:
+            text += f"   {b['nomi'] or b['kod']}: {b['qty']} ta\n"
+        text += f"   Jami: {info['jami']} ta\n"
+    if not bor:
+        text = "📋 Bugun hali sotuv kiritilmagan."
+    await say(message, text, reply_markup=await sales_menu(user_id))
