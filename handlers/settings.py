@@ -64,7 +64,7 @@ async def sozlamalar_menu(user_id):
         ["📦 Materiallar ro'yxati"],
         ["✏️ Materialni tahrirlash"],
         ["🗑️ Materialni o'chirish"],
-        ["📋 Qolip formulasi"],
+        ["🏭 Mahsulot boshqaruvi"],
         ["⚠️ Minimum chegara"],
         ["🔔 Hisobot jadvali"],
         ["🔒 PIN kod"],
@@ -370,139 +370,8 @@ async def material_ochirish_id(message: Message, state: FSMContext):
         )
 
 
-# ── Qolip formulasi ──
-@router.message(Tkey("📋 Qolip formulasi"))
-async def qolip_formulasi(message: Message):
-    if not await _faqat_superadmin(message):
-        return
-    try:
-        formula = await db.get_qolip_formula()
-        keyboard = await build_keyboard(message.from_user.id, [
-            ["✏️ Formulani yangilash"],
-            ["🏠 Asosiy menyu"],
-        ])
-        if not formula:
-            await say(
-                message,
-                "❌ Formula kiritilmagan!\n"
-                "✏️ Formulani yangilash tugmasini bosing.",
-                reply_markup=keyboard
-            )
-            return
-        text = "📋 1 qolipga ketadigan materiallar:\n\n"
-        for f in formula:
-            text += f"🔹 {f[0]}: {f[1]} {f[2]}\n"
-        await say(message, text, reply_markup=keyboard)
-    except Exception as e:
-        await say_error(message, e)
-
-
-@router.message(Tkey("✏️ Formulani yangilash"))
-async def formula_yangilash(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
-        return
-    try:
-        await state.clear()
-        materials = await db.get_materials()
-        if not materials:
-            await say(
-                message,
-                "❌ Avval material qo'shing!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
-            )
-            return
-        await db.clear_qolip_formula()
-        await state.update_data(
-            materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials],
-            index=0
-        )
-        await state.set_state(FormulaState.miqdor)
-        m = materials[0]
-        await say(
-            message,
-            f"1 qolipga {m[1]} dan qancha ketadi?\n"
-            f"(Ombordagi birlik: {m[4]})\n"
-            f"Misol: 110"
-        )
-    except Exception as e:
-        await state.clear()
-        await say_error(message, e)
-
-
-@router.message(FormulaState.miqdor)
-async def formula_miqdor(message: Message, state: FSMContext):
-    try:
-        miqdor = float(message.text.replace(",", "."))
-        if miqdor <= 0:
-            raise ValueError
-        await state.update_data(miqdor=miqdor)
-        await state.set_state(FormulaState.birlik)
-        data = await state.get_data()
-        materials = data["materials"]
-        index = data["index"]
-        m = materials[index]
-        await say(
-            message,
-            f"{m[1]} uchun birlikni kiriting:\n"
-            f"Misol: kg, g, litr, ml\n"
-            f"(Omborda: {m[4]})"
-        )
-    except ValueError:
-        await say(message, "❌ Faqat musbat son kiriting! Misol: 110")
-
-
-@router.message(FormulaState.birlik)
-async def formula_birlik(message: Message, state: FSMContext):
-    try:
-        data = await state.get_data()
-        materials = data["materials"]
-        index = data["index"]
-        miqdor = data["miqdor"]
-        birlik = message.text.strip()
-        m = materials[index]
-        # Birlik material o'lchamiga (kg/litr) mos kelishini tekshiramiz
-        if (not db.birlik_qollab_quvvatlanadimi(birlik)
-                or db.birlik_bazasi(birlik) != db.birlik_bazasi(m[4])):
-            await say(
-                message,
-                f"❌ Birlik '{m[1]}' o'lchamiga mos emas "
-                f"(ombor birligi: {m[4]}).\n"
-                f"Bir xil o'lchamdagi birlik kiriting. Qaytadan:"
-            )
-            return
-        await db.add_qolip_formula(m[0], miqdor, birlik)
-        index += 1
-        if index < len(materials):
-            await state.update_data(index=index)
-            await state.set_state(FormulaState.miqdor)
-            next_m = materials[index]
-            await say(
-                message,
-                f"1 qolipga {next_m[1]} dan qancha ketadi?\n"
-                f"(Ombordagi birlik: {next_m[4]})\n"
-                f"Misol: 50"
-            )
-        else:
-            user = await db.get_user(message.from_user.id)
-            await db.add_audit_log(
-                message.from_user.id,
-                user["ism"] if user else str(message.from_user.id),
-                user["rol"] if user else "-",
-                "Qolip formulasi yangilandi",
-                f"{len(materials)} ta material formulasi saqlandi"
-            )
-            await state.clear()
-            await say(
-                message,
-                "✅ Formula saqlandi!",
-                reply_markup=await sozlamalar_menu(message.from_user.id)
-            )
-    except Exception as e:
-        await state.clear()
-        await say_error(
-            message, e,
-            reply_markup=await sozlamalar_menu(message.from_user.id)
-        )
+# (Eski global "Qolip formulasi" olib tashlandi — endi har mahsulot uchun
+#  "🏭 Mahsulot boshqaruvi" bo'limida (fayl oxirida) sozlanadi.)
 
 
 # ── Minimum chegara ──
@@ -962,3 +831,550 @@ async def til_ozgartirish_callback(callback: CallbackQuery):
         reply_markup=await sozlamalar_menu(user_id)
     )
     await callback.answer()
+
+
+
+# ════════════════════════════════════════════════════════════════════
+# 🏭 MAHSULOT BOSHQARUVI (to'liq dinamik)
+# ════════════════════════════════════════════════════════════════════
+class MahsulotState(StatesGroup):
+    nomi = State()
+    emoji = State()
+
+
+class MahsulotRename(StatesGroup):
+    nomi = State()
+    emoji = State()
+
+
+class BlokState(StatesGroup):
+    kod = State()
+    nomi = State()
+    olcham = State()
+    dona = State()
+
+
+class ShablonState(StatesGroup):
+    nomi = State()
+    chiqim = State()
+
+
+def _slug(s):
+    out = []
+    for ch in (s or "").lower():
+        if ch.isalnum() and ord(ch) < 128:
+            out.append(ch)
+        elif out and out[-1] != "_":
+            out.append("_")
+    res = "".join(out).strip("_")
+    return res or "mahsulot"
+
+
+async def _unique_kod(base):
+    kod = base
+    i = 1
+    while await db.get_mahsulot_by_kod(kod):
+        i += 1
+        kod = f"{base}{i}"
+    return kod
+
+
+async def _cb_ok(callback: CallbackQuery) -> bool:
+    user = await db.get_user(callback.from_user.id)
+    if not user or not user["faol"]:
+        await callback.answer("❌", show_alert=True)
+        return False
+    if user["rol"] == "superadmin" or await db.has_permission(
+            callback.from_user.id, user["rol"], "sozlama_boshqaruv"):
+        return True
+    await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+    return False
+
+
+async def _mb_root_kb():
+    prods = await db.get_mahsulotlar(faqat_faol=False)
+    kb = []
+    for p in prods:
+        belgi = "" if p["faol"] else " (arxiv)"
+        kb.append([InlineKeyboardButton(
+            text=f"{p['emoji']} {p['nomi']}{belgi}",
+            callback_data=f"mb_open:{p['id']}")])
+    kb.append([InlineKeyboardButton(text="➕ Yangi mahsulot", callback_data="mb_add")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _mb_detail(pid):
+    p = await db.get_mahsulot(pid)
+    if not p:
+        return "❌ Mahsulot topilmadi.", InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Ortga", callback_data="mb_root")]])
+    bloklar = await db.get_bloklar(pid)
+    shablonlar = await db.get_shablonlar(pid)
+    formula = await db.get_qolip_formula(pid)
+
+    text = f"{p['emoji']} {p['nomi']}"
+    text += "" if p["faol"] else "  (arxivlangan)"
+    text += "\n\n👷 Ish haqi (1 qolip): " + f"{p['ishchi_haqi']:.0f} so'm\n"
+    text += f"🛠 Qo'shimcha (1 qolip): {p['qoshimcha_xarajat']:.0f} so'm\n"
+    text += "   (narxlar 💵 Narxlar va valyuta bo'limida)\n\n"
+
+    text += "🧱 Bloklar:\n"
+    if bloklar:
+        for b in bloklar:
+            text += (f"   • {b['nomi']} [{b['kod']}] — 1 qolipga "
+                     f"{b['qolip_dona']:.0f} dona\n")
+    else:
+        text += "   (yo'q)\n"
+
+    text += "\n📦 Shablonlar:\n"
+    if shablonlar:
+        for s in shablonlar:
+            ch = ", ".join(f"{c['soni']}×{c['block_kod']}" for c in s["chiqim"])
+            text += f"   • {s['nomi']}: {ch or 'bo`sh'}\n"
+    else:
+        text += "   (yo'q)\n"
+
+    text += "\n📋 Formula (1 qolipga):\n"
+    if formula:
+        for f in formula:
+            text += f"   • {f[0]}: {f[1]} {f[2]}\n"
+    else:
+        text += "   (yo'q)\n"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧱 Bloklar", callback_data=f"mb_blk:{pid}"),
+         InlineKeyboardButton(text="📦 Shablonlar", callback_data=f"mb_shb:{pid}")],
+        [InlineKeyboardButton(text="📋 Formula", callback_data=f"mb_frm:{pid}")],
+        [InlineKeyboardButton(text="✏️ Nomi", callback_data=f"mb_ren:{pid}"),
+         InlineKeyboardButton(
+             text=("🗑 Arxivlash" if p["faol"] else "♻️ Faollashtirish"),
+             callback_data=f"mb_arch:{pid}")],
+        [InlineKeyboardButton(text="⬅️ Ortga", callback_data="mb_root")],
+    ])
+    return text, kb
+
+
+async def _mb_blk_view(pid):
+    bloklar = await db.get_bloklar(pid)
+    text = "🧱 Bloklar (o'chirish uchun bosing):\n\n"
+    if not bloklar:
+        text += "   (yo'q)\n"
+    kb = []
+    for b in bloklar:
+        kb.append([InlineKeyboardButton(
+            text=f"🗑 {b['nomi']} [{b['kod']}]",
+            callback_data=f"mb_blkdel:{b['id']}")])
+    kb.append([InlineKeyboardButton(text="➕ Blok qo'shish", callback_data=f"mb_blkadd:{pid}")])
+    kb.append([InlineKeyboardButton(text="⬅️ Ortga", callback_data=f"mb_open:{pid}")])
+    return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _mb_shb_view(pid):
+    shablonlar = await db.get_shablonlar(pid)
+    text = "📦 Shablonlar (o'chirish uchun bosing):\n\n"
+    if not shablonlar:
+        text += "   (yo'q)\n"
+    kb = []
+    for s in shablonlar:
+        ch = ", ".join(f"{c['soni']}×{c['block_kod']}" for c in s["chiqim"])
+        kb.append([InlineKeyboardButton(
+            text=f"🗑 {s['nomi']} ({ch or 'bo`sh'})",
+            callback_data=f"mb_shbdel:{s['id']}")])
+    kb.append([InlineKeyboardButton(text="➕ Shablon qo'shish", callback_data=f"mb_shbadd:{pid}")])
+    kb.append([InlineKeyboardButton(text="⬅️ Ortga", callback_data=f"mb_open:{pid}")])
+    return text, InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+@router.message(Tkey("🏭 Mahsulot boshqaruvi"))
+async def mahsulot_boshqaruvi(message: Message, state: FSMContext):
+    if not await _faqat_superadmin(message):
+        return
+    await state.clear()
+    xabar = await t("🏭 Mahsulot boshqaruvi\nMahsulotni tanlang yoki yangi qo'shing:",
+                    message.from_user.id)
+    await message.answer(xabar, reply_markup=await _mb_root_kb())
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("mb_"))
+async def mb_callback(callback: CallbackQuery, state: FSMContext):
+    if not await _cb_ok(callback):
+        return
+    action, _, arg = callback.data.partition(":")
+    aid = int(arg) if arg.isdigit() else None
+
+    if action == "mb_root":
+        await state.clear()
+        await callback.message.edit_text(
+            "🏭 Mahsulot boshqaruvi\nMahsulotni tanlang yoki yangi qo'shing:",
+            reply_markup=await _mb_root_kb())
+        await callback.answer()
+        return
+
+    if action == "mb_open":
+        await state.clear()
+        text, kb = await _mb_detail(aid)
+        await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    if action == "mb_blk":
+        text, kb = await _mb_blk_view(aid)
+        await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    if action == "mb_shb":
+        text, kb = await _mb_shb_view(aid)
+        await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    if action == "mb_arch":
+        p = await db.get_mahsulot(aid)
+        if p:
+            await db.set_mahsulot_faol(aid, not p["faol"])
+        text, kb = await _mb_detail(aid)
+        await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer("✅")
+        return
+
+    if action == "mb_blkdel":
+        blok = await db.get_blok_by_id(aid)
+        pid = blok["product_id"] if blok else None
+        await db.delete_blok(aid)
+        if pid:
+            text, kb = await _mb_blk_view(pid)
+            await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer("🗑 O'chirildi")
+        return
+
+    if action == "mb_shbdel":
+        sh = await db.get_shablon(aid)
+        pid = sh["product_id"] if sh else None
+        await db.delete_shablon(aid)
+        if pid:
+            text, kb = await _mb_shb_view(pid)
+            await callback.message.edit_text(text, reply_markup=kb)
+        await callback.answer("🗑 O'chirildi")
+        return
+
+    # ── FSM boshlovchi amallar ──
+    if action == "mb_add":
+        await state.clear()
+        await state.set_state(MahsulotState.nomi)
+        await callback.message.answer(
+            await t("➕ Yangi mahsulot nomini kiriting:\nMisol: Polistirol blok",
+                    callback.from_user.id))
+        await callback.answer()
+        return
+
+    if action == "mb_ren":
+        await state.clear()
+        await state.update_data(pid=aid)
+        await state.set_state(MahsulotRename.nomi)
+        await callback.message.answer(
+            await t("✏️ Yangi nom kiriting:", callback.from_user.id))
+        await callback.answer()
+        return
+
+    if action == "mb_blkadd":
+        await state.clear()
+        await state.update_data(pid=aid)
+        await state.set_state(BlokState.kod)
+        await callback.message.answer(
+            await t("🧱 Blok kodini kiriting (qisqa):\nMisol: P  yoki  A",
+                    callback.from_user.id))
+        await callback.answer()
+        return
+
+    if action == "mb_shbadd":
+        bloklar = await db.get_bloklar(aid)
+        if not bloklar:
+            await callback.answer("❌ Avval blok qo'shing!", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(pid=aid)
+        await state.set_state(ShablonState.nomi)
+        await callback.message.answer(
+            await t("📦 Shablon nomini kiriting:\nMisol: Standart  yoki  Shablon 1",
+                    callback.from_user.id))
+        await callback.answer()
+        return
+
+    if action == "mb_frm":
+        materials = await db.get_materials()
+        if not materials:
+            await callback.answer("❌ Avval material qo'shing!", show_alert=True)
+            return
+        await db.clear_qolip_formula(aid)
+        await state.clear()
+        await state.update_data(
+            pid=aid,
+            materials=[(m[0], m[1], m[2], m[3], m[4]) for m in materials],
+            index=0)
+        await state.set_state(FormulaState.miqdor)
+        m = materials[0]
+        await callback.message.answer(await t(
+            f"📋 1 qolipga {m[1]} dan qancha ketadi?\n"
+            f"(Ombordagi birlik: {m[4]})\nMisol: 110\n\n0 = bu material kerak emas",
+            callback.from_user.id))
+        await callback.answer()
+        return
+
+    await callback.answer()
+
+
+# ── Mahsulot qo'shish (FSM) ──
+@router.message(MahsulotState.nomi)
+async def mb_add_nomi(message: Message, state: FSMContext):
+    nomi = message.text.strip()
+    if not nomi:
+        await say(message, "❌ Nom bo'sh bo'lmasin!")
+        return
+    await state.update_data(nomi=nomi)
+    await state.set_state(MahsulotState.emoji)
+    await say(message, "Emoji kiriting (ixtiyoriy):\nMisol: 🧊\nO'tkazib yuborish: 0")
+
+
+@router.message(MahsulotState.emoji)
+async def mb_add_emoji(message: Message, state: FSMContext):
+    data = await state.get_data()
+    emoji = message.text.strip()
+    if emoji == "0" or not emoji:
+        emoji = "📦"
+    nomi = data["nomi"]
+    kod = await _unique_kod(_slug(nomi))
+    pid = await db.add_mahsulot(kod, nomi, emoji)
+    user = await db.get_user(message.from_user.id)
+    await db.add_audit_log(
+        message.from_user.id, user["ism"] if user else "-",
+        user["rol"] if user else "-", "Mahsulot qo'shildi", f"{nomi} ({kod})")
+    await state.clear()
+    await say(message,
+              f"✅ '{nomi}' qo'shildi!\n\n"
+              f"Endi 🧱 Bloklar, 📦 Shablonlar va 📋 Formulani sozlang.",
+              reply_markup=await sozlamalar_menu(message.from_user.id))
+    text, kb = await _mb_detail(pid)
+    await message.answer(text, reply_markup=kb)
+
+
+# ── Nomni o'zgartirish (FSM) ──
+@router.message(MahsulotRename.nomi)
+async def mb_ren_nomi(message: Message, state: FSMContext):
+    nomi = message.text.strip()
+    if not nomi:
+        await say(message, "❌ Nom bo'sh bo'lmasin!")
+        return
+    await state.update_data(nomi=nomi)
+    await state.set_state(MahsulotRename.emoji)
+    await say(message, "Emoji kiriting (ixtiyoriy):\nO'zgartirmaslik: 0")
+
+
+@router.message(MahsulotRename.emoji)
+async def mb_ren_emoji(message: Message, state: FSMContext):
+    data = await state.get_data()
+    pid = data["pid"]
+    p = await db.get_mahsulot(pid)
+    emoji = message.text.strip()
+    if emoji == "0" or not emoji:
+        emoji = p["emoji"] if p else "📦"
+    await db.update_mahsulot(pid, data["nomi"], emoji)
+    await state.clear()
+    await say(message, "✅ Yangilandi!",
+              reply_markup=await sozlamalar_menu(message.from_user.id))
+    text, kb = await _mb_detail(pid)
+    await message.answer(text, reply_markup=kb)
+
+
+# ── Blok qo'shish (FSM) ──
+@router.message(BlokState.kod)
+async def mb_blk_kod(message: Message, state: FSMContext):
+    kod = message.text.strip()
+    if not kod or len(kod) > 16:
+        await say(message, "❌ Kod 1–16 belgidan iborat bo'lsin!")
+        return
+    data = await state.get_data()
+    mavjud = await db.get_blok(data["pid"], kod)
+    if mavjud:
+        await say(message, "❌ Bu kod allaqachon mavjud! Boshqa kod kiriting:")
+        return
+    await state.update_data(kod=kod)
+    await state.set_state(BlokState.nomi)
+    await say(message, "Blok to'liq nomini kiriting:\nMisol: Polistirol blok")
+
+
+@router.message(BlokState.nomi)
+async def mb_blk_nomi(message: Message, state: FSMContext):
+    await state.update_data(nomi=message.text.strip())
+    await state.set_state(BlokState.olcham)
+    await say(message, "O'lchamini kiriting (ixtiyoriy):\nMisol: 30×60×20\nO'tkazib yuborish: 0")
+
+
+@router.message(BlokState.olcham)
+async def mb_blk_olcham(message: Message, state: FSMContext):
+    olcham = message.text.strip()
+    if olcham == "0":
+        olcham = ""
+    await state.update_data(olcham=olcham)
+    await state.set_state(BlokState.dona)
+    await say(message,
+              "Tannarx uchun: 1 qolipdan shu blokdan nechta chiqadi?\n"
+              "(1 blok tannarxi = qolip tannarxi ÷ shu son)\nMisol: 30")
+
+
+@router.message(BlokState.dona)
+async def mb_blk_dona(message: Message, state: FSMContext):
+    try:
+        dona = float(message.text.replace(",", "."))
+        if dona <= 0:
+            raise ValueError
+    except ValueError:
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 30")
+        return
+    data = await state.get_data()
+    await db.add_blok(data["pid"], data["kod"], data["nomi"], data["olcham"], dona, 0)
+    user = await db.get_user(message.from_user.id)
+    await db.add_audit_log(
+        message.from_user.id, user["ism"] if user else "-",
+        user["rol"] if user else "-", "Blok qo'shildi",
+        f"{data['nomi']} [{data['kod']}]")
+    await state.clear()
+    await say(message, f"✅ Blok qo'shildi: {data['nomi']}\n"
+                       f"💡 Sotuv narxini 💵 Narxlar bo'limidan kiriting.",
+              reply_markup=await sozlamalar_menu(message.from_user.id))
+    text, kb = await _mb_blk_view(data["pid"])
+    await message.answer(text, reply_markup=kb)
+
+
+# ── Shablon qo'shish (FSM) ──
+@router.message(ShablonState.nomi)
+async def mb_shb_nomi(message: Message, state: FSMContext):
+    nomi = message.text.strip()
+    if not nomi:
+        await say(message, "❌ Nom bo'sh bo'lmasin!")
+        return
+    data = await state.get_data()
+    bloklar = await db.get_bloklar(data["pid"])
+    await state.update_data(
+        nomi=nomi,
+        bloklar=[(b["kod"], b["nomi"]) for b in bloklar],
+        b_index=0, chiqim=[])
+    await state.set_state(ShablonState.chiqim)
+    b = bloklar[0]
+    await say(message,
+              f"📦 '{nomi}' shabloni:\n\n"
+              f"1 qolipga nechta '{b['nomi']}' [{b['kod']}] chiqadi?\n"
+              f"Yo'q bo'lsa: 0")
+
+
+@router.message(ShablonState.chiqim)
+async def mb_shb_chiqim(message: Message, state: FSMContext):
+    try:
+        soni = int(message.text.strip())
+        if soni < 0:
+            raise ValueError
+    except ValueError:
+        await say(message, "❌ Faqat butun son kiriting! (yo'q bo'lsa 0)")
+        return
+    data = await state.get_data()
+    bloklar = data["bloklar"]
+    b_index = data["b_index"]
+    chiqim = data["chiqim"]
+    kod, _nomi = bloklar[b_index]
+    if soni > 0:
+        chiqim.append((kod, soni))
+    b_index += 1
+    if b_index < len(bloklar):
+        await state.update_data(b_index=b_index, chiqim=chiqim)
+        bk, bn = bloklar[b_index]
+        await say(message, f"1 qolipga nechta '{bn}' [{bk}] chiqadi?\nYo'q bo'lsa: 0")
+        return
+    # Tugadi
+    if not chiqim:
+        await state.clear()
+        await say(message, "❌ Shablon bo'sh — saqlanmadi (kamida 1 blok kerak).",
+                  reply_markup=await sozlamalar_menu(message.from_user.id))
+        return
+    pid = data["pid"]
+    mavjud = await db.get_shablonlar(pid)
+    kod = str(len(mavjud) + 1)
+    sid = await db.add_shablon(pid, kod, data["nomi"])
+    await db.set_shablon_chiqim(sid, chiqim)
+    user = await db.get_user(message.from_user.id)
+    await db.add_audit_log(
+        message.from_user.id, user["ism"] if user else "-",
+        user["rol"] if user else "-", "Shablon qo'shildi",
+        f"{data['nomi']}: " + ", ".join(f"{s}×{k}" for k, s in chiqim))
+    await state.clear()
+    await say(message, f"✅ Shablon qo'shildi: {data['nomi']}",
+              reply_markup=await sozlamalar_menu(message.from_user.id))
+    text, kb = await _mb_shb_view(pid)
+    await message.answer(text, reply_markup=kb)
+
+
+# ── Formula (FSM, product-aware) ──
+@router.message(FormulaState.miqdor)
+async def mb_formula_miqdor(message: Message, state: FSMContext):
+    try:
+        miqdor = float(message.text.replace(",", "."))
+        if miqdor < 0:
+            raise ValueError
+    except ValueError:
+        await say(message, "❌ Faqat musbat son kiriting! Misol: 110 (yoki 0)")
+        return
+    data = await state.get_data()
+    materials = data["materials"]
+    index = data["index"]
+    m = materials[index]
+
+    if miqdor == 0:
+        # Bu materialni o'tkazib yuboramiz
+        await _formula_keyingi(message, state, data, index)
+        return
+
+    await state.update_data(miqdor=miqdor)
+    await state.set_state(FormulaState.birlik)
+    await say(message,
+              f"{m[1]} uchun birlikni kiriting:\n"
+              f"Misol: kg, g, litr, ml\n(Omborda: {m[4]})")
+
+
+@router.message(FormulaState.birlik)
+async def mb_formula_birlik(message: Message, state: FSMContext):
+    data = await state.get_data()
+    materials = data["materials"]
+    index = data["index"]
+    miqdor = data["miqdor"]
+    birlik = message.text.strip()
+    m = materials[index]
+    if (not db.birlik_qollab_quvvatlanadimi(birlik)
+            or db.birlik_bazasi(birlik) != db.birlik_bazasi(m[4])):
+        await say(message,
+                  f"❌ Birlik '{m[1]}' o'lchamiga mos emas (ombor: {m[4]}).\n"
+                  f"Qaytadan:")
+        return
+    await db.add_qolip_formula(data["pid"], m[0], miqdor, birlik)
+    await _formula_keyingi(message, state, data, index)
+
+
+async def _formula_keyingi(message, state, data, index):
+    materials = data["materials"]
+    index += 1
+    if index < len(materials):
+        await state.update_data(index=index)
+        await state.set_state(FormulaState.miqdor)
+        nm = materials[index]
+        await say(message,
+                  f"1 qolipga {nm[1]} dan qancha ketadi?\n"
+                  f"(Ombordagi birlik: {nm[4]})\nMisol: 50\n0 = kerak emas")
+    else:
+        user = await db.get_user(message.from_user.id)
+        await db.add_audit_log(
+            message.from_user.id, user["ism"] if user else "-",
+            user["rol"] if user else "-", "Qolip formulasi yangilandi",
+            f"product_id={data['pid']}")
+        await state.clear()
+        await say(message, "✅ Formula saqlandi!",
+                  reply_markup=await sozlamalar_menu(message.from_user.id))
+        text, kb = await _mb_detail(data["pid"])
+        await message.answer(text, reply_markup=kb)

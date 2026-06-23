@@ -5,7 +5,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import date, timedelta, timezone, datetime
+from datetime import timedelta, timezone, datetime
 import io
 import csv
 import openpyxl
@@ -14,7 +14,7 @@ import database as db
 import valyuta as val
 import charts
 from translation import (
-    Tkey, say, say_error, build_keyboard, t, log_exc, GENERIC_ERROR,
+    Tkey, say, build_keyboard, t, log_exc, GENERIC_ERROR,
     foydalanuvchi_tili, tarjima_qil, register_ui,
 )
 
@@ -23,7 +23,6 @@ TOSHKENT_TZ = timezone(timedelta(hours=5))
 
 router = Router()
 
-# Davr tugmalari (kanonik o'zbekcha) — pre-warm uchun ro'yxatga olamiz
 DAVRLAR = [
     ("bugun", "Bugun"),
     ("kecha", "Kecha"),
@@ -36,7 +35,8 @@ DAVRLAR = [
     ("30kun", "Oxirgi 30 kun"),
     ("custom", "📅 Ixtiyoriy davr"),
 ]
-register_ui(*[label for _, label in DAVRLAR], "📅 Davrni tanlang:")
+register_ui(*[label for _, label in DAVRLAR], "📅 Davrni tanlang:", "Hammasi",
+            "📦 Mahsulotni tanlang:")
 
 
 class CustomRange(StatesGroup):
@@ -61,7 +61,6 @@ async def reports_menu(user_id):
 
 # ── Davr oralig'i ──
 def davr_oraligi(kod):
-    """(boshliq, oxiri, sarlavha) qaytaradi."""
     bugun = db.bugungi_sana()
     if kod == "bugun":
         return bugun, bugun, "Bugun"
@@ -92,20 +91,19 @@ def davr_oraligi(kod):
 
 
 def oldingi_davr(boshliq, oxiri):
-    """Joriy davrga teng uzunlikdagi oldingi davr."""
     uzunlik = (oxiri - boshliq).days + 1
     prev_oxiri = boshliq - timedelta(days=1)
     prev_boshliq = prev_oxiri - timedelta(days=uzunlik - 1)
     return prev_boshliq, prev_oxiri
 
 
-async def davr_keyboard(user_id, rtype):
-    """Davr tanlash uchun tarjima qilingan inline klaviatura."""
+async def davr_keyboard(user_id, rtype, pid_str):
     til = await foydalanuvchi_tili(user_id)
     kb, row = [], []
     for kod, label in DAVRLAR:
         matn = label if til == "uz" else await tarjima_qil(label, til)
-        row.append(InlineKeyboardButton(text=matn, callback_data=f"rep:{rtype}:{kod}"))
+        row.append(InlineKeyboardButton(
+            text=matn, callback_data=f"rep:{rtype}:{pid_str}:{kod}"))
         if len(row) == 2:
             kb.append(row)
             row = []
@@ -114,23 +112,55 @@ async def davr_keyboard(user_id, rtype):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# ── Hisoblash yordamchilari ──
-def hisobla_production(logs):
-    s1 = s2 = s3 = 0
-    for log in logs:
-        if log[1] == 1: s1 += log[2]
-        elif log[1] == 2: s2 += log[2]
-        elif log[1] == 3: s3 += log[2]
-    jami_qolip = s1 + s2 + s3
-    A_blok = s1 * 12 + s3 * 11
-    B_blok = s2 * 24 + s3 * 2
-    return jami_qolip, A_blok, B_blok, s1, s2, s3
+async def product_filter_keyboard(user_id, rtype):
+    til = await foydalanuvchi_tili(user_id)
+    hammasi = "Hammasi" if til == "uz" else await tarjima_qil("Hammasi", til)
+    kb = [[InlineKeyboardButton(text=f"🌐 {hammasi}", callback_data=f"repp:{rtype}:all")]]
+    for p in await db.get_mahsulotlar(faqat_faol=False):
+        kb.append([InlineKeyboardButton(
+            text=f"{p['emoji']} {p['nomi']}", callback_data=f"repp:{rtype}:{p['id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def hisobla_sales(logs):
-    A = sum(log[2] for log in logs if log[1] == "A")
-    B = sum(log[2] for log in logs if log[1] == "B")
-    return A, B
+# ── Yordamchilar ──
+def _vaqt_str(vaqt, fmt="%d.%m %H:%M"):
+    if hasattr(vaqt, "strftime"):
+        if vaqt.tzinfo is None:
+            vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+        return vaqt.strftime(fmt)
+    return str(vaqt)[:16]
+
+
+def _delta(cur, prev):
+    if prev == 0:
+        return "(▲ yangi)" if cur > 0 else ""
+    p = (cur - prev) / prev * 100
+    arrow = "▲" if p >= 0 else "▼"
+    return f"({arrow} {abs(p):.1f}%)"
+
+
+def _group_by_product(rows):
+    out = {}
+    for r in rows:
+        d = out.setdefault(r["product_id"], {"nomi": r["product_nomi"], "items": []})
+        d["items"].append(r)
+    return out
+
+
+async def _narx_maps():
+    tannarx = await db.get_block_tannarx_map()
+    sotuv = {}
+    for m in await db.get_mahsulotlar(faqat_faol=False):
+        for b in await db.get_bloklar(m["id"]):
+            sotuv[(m["id"], b["kod"])] = b["sotuv_narx"] or 0
+    return tannarx, sotuv
+
+
+async def _label_pid(product_id):
+    if not product_id:
+        return "Hammasi"
+    p = await db.get_mahsulot(product_id)
+    return p["nomi"] if p else "?"
 
 
 async def ombor_holati():
@@ -147,186 +177,148 @@ async def ombor_holati():
         return "   Xatolik\n"
 
 
-async def tayyor_holati():
+async def tayyor_holati(product_id=None):
     try:
-        goods = await db.get_finished_goods()
+        goods = await db.get_all_finished_goods()
+        if product_id:
+            goods = [g for g in goods if g["product_id"] == product_id]
         if not goods:
             return "   Ma'lumot yo'q\n"
         text = ""
         jami = 0
+        joriy = None
         for g in goods:
-            text += f"   {g[0]} blok: {g[1]} ta\n"
-            jami += g[1]
+            if g["product_id"] != joriy:
+                joriy = g["product_id"]
+                text += f"   {g['emoji']} {g['product_nomi']}:\n"
+            text += f"      {g['nomi']}: {g['qoldiq']} ta\n"
+            jami += g["qoldiq"]
         text += f"   Jami: {jami} ta\n"
         return text
     except Exception:
         return "   Xatolik\n"
 
 
-def _vaqt_str(vaqt, fmt="%d.%m %H:%M"):
-    if hasattr(vaqt, "strftime"):
-        if vaqt.tzinfo is None:
-            vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
-        return vaqt.strftime(fmt)
-    return str(vaqt)[:16]
-
-
-def _delta(cur, prev):
-    """O'sish/pasayish foizi (matn)."""
-    if prev == 0:
-        return "(▲ yangi)" if cur > 0 else ""
-    p = (cur - prev) / prev * 100
-    arrow = "▲" if p >= 0 else "▼"
-    return f"({arrow} {abs(p):.1f}%)"
-
-
-# ── Hisobot matnlari (generatorlar) ──
-async def hisobot_matni(boshliq, oxiri, sarlavha):
+# ── Hisobot matnlari ──
+async def hisobot_matni(boshliq, oxiri, sarlavha, product_id=None):
     try:
-        prod_logs = await db.get_production_range(boshliq, oxiri)
-        sales_logs = await db.get_sales_range(boshliq, oxiri)
-        jami_qolip, A_blok, B_blok, s1, s2, s3 = hisobla_production(prod_logs)
-        A_sotuv, B_sotuv = hisobla_sales(sales_logs)
+        qol = await db.get_production_qolip_range(boshliq, oxiri, product_id)
+        pblk = await db.get_production_blocks_range(boshliq, oxiri, product_id)
+        sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
         ombor = await ombor_holati()
-        tayyor = await tayyor_holati()
-        return (
-            f"{sarlavha}\n"
-            f"📅 {boshliq} — {oxiri}\n"
-            f"━━━━━━━━━━━━━━━━\n\n"
-            f"🏭 Ishlab chiqarish:\n"
-            f"   Jami qolip: {jami_qolip} ta\n"
-            f"   Sh1: {s1} | Sh2: {s2} | Sh3: {s3}\n"
-            f"   A blok: {A_blok} ta\n"
-            f"   B blok: {B_blok} ta\n\n"
-            f"💰 Sotuv:\n"
-            f"   A blok: {A_sotuv} ta\n"
-            f"   B blok: {B_sotuv} ta\n"
-            f"   Jami: {A_sotuv + B_sotuv} ta\n\n"
-            f"🏬 Tayyor mahsulot:\n{tayyor}\n"
-            f"🏪 Xom ashyo qoldig'i:\n{ombor}"
-        )
+        tayyor = await tayyor_holati(product_id)
+
+        text = (f"{sarlavha}\n📅 {boshliq} — {oxiri}\n"
+                f"━━━━━━━━━━━━━━━━\n\n🏭 Ishlab chiqarish:\n")
+        if qol:
+            pgr = _group_by_product(pblk)
+            for pid, info in qol.items():
+                text += f"   {info['nomi']}: {info['qolip']} qolip\n"
+                for it in pgr.get(pid, {}).get("items", []):
+                    text += f"      {it['blok_nomi']}: {it['soni']} ta\n"
+        else:
+            text += "   Ma'lumot yo'q\n"
+
+        text += "\n💰 Sotuv:\n"
+        if sblk:
+            for pid, info in _group_by_product(sblk).items():
+                text += f"   {info['nomi']}:\n"
+                jami = 0
+                for it in info["items"]:
+                    text += f"      {it['blok_nomi']}: {it['qty']} ta\n"
+                    jami += it["qty"]
+                text += f"      Jami: {jami} ta\n"
+        else:
+            text += "   Ma'lumot yo'q\n"
+
+        text += f"\n🏬 Tayyor mahsulot:\n{tayyor}\n"
+        text += f"🏪 Xom ashyo qoldig'i:\n{ombor}"
+        return text
     except Exception as e:
         log_exc("hisobot_matni", e)
         return GENERIC_ERROR
 
 
-async def gen_tafsil(boshliq, oxiri, sarlavha):
-    prod_detail = await db.get_production_detail_range(boshliq, oxiri)
-    sales_detail = await db.get_sales_detail_range(boshliq, oxiri)
-    chiqim = await db.get_material_chiqim_range(boshliq, oxiri)
+async def gen_tafsil(boshliq, oxiri, sarlavha, product_id=None):
+    prod_detail = await db.get_production_detail_range(boshliq, oxiri, product_id)
+    sales_detail = await db.get_sales_detail_range(boshliq, oxiri, product_id)
+    chiqim = await db.get_material_sarfi(boshliq, oxiri, product_id)
 
     text = f"📊 Tafsilotli hisobot ({sarlavha})\n📅 {boshliq} — {oxiri}\n━━━━━━━━━━━━━━━━\n\n"
     text += "🏭 ISHLAB CHIQARISH:\n"
     if prod_detail:
         for p in prod_detail[:15]:
-            shablon_nomi = {1: "A(12ta)", 2: "B(24ta)", 3: "11A+2B"}.get(p["shablon"], "?")
-            text += (
-                f"   {_vaqt_str(p['vaqt'])} | {p.get('user_ism') or 'Nomalum'}\n"
-                f"   Shablon {p['shablon']}({shablon_nomi}): {p['qolip_soni']} qolip\n"
-            )
+            text += (f"   {_vaqt_str(p['vaqt'])} | {p.get('user_ism') or 'Nomalum'}\n"
+                     f"   {p.get('product_nomi') or ''} · {p.get('shablon_nomi') or '?'}: "
+                     f"{p['qolip_soni']} qolip\n")
     else:
         text += "   Ma'lumot yo'q\n"
 
     text += "\n💰 SOTUV:\n"
     if sales_detail:
         for s in sales_detail[:15]:
-            text += (
-                f"   {_vaqt_str(s['vaqt'])} | {s.get('user_ism') or 'Nomalum'}\n"
-                f"   {s['block_type']} blok: {s['miqdor']} ta\n"
-            )
+            text += (f"   {_vaqt_str(s['vaqt'])} | {s.get('user_ism') or 'Nomalum'}\n"
+                     f"   {s.get('product_nomi') or ''} · "
+                     f"{s.get('blok_nomi') or s['block_type']}: {s['miqdor']} ta\n")
     else:
         text += "   Ma'lumot yo'q\n"
 
     text += "\n📉 XOM ASHYO SARFI:\n"
     if chiqim:
-        sarfi_dict = {}
         for ch in chiqim:
-            nomi = ch["material_nomi"]
-            if nomi not in sarfi_dict:
-                sarfi_dict[nomi] = {"jami": 0, "birlik": ch["birlik"]}
-            sarfi_dict[nomi]["jami"] += float(ch["jami"])
-        for nomi, info in sarfi_dict.items():
-            asl = db.asosiydan_birlikga(info["jami"], info["birlik"])
-            text += f"   {nomi}: {asl:.2f} {info['birlik']}\n"
+            asl = db.asosiydan_birlikga(ch["jami"], ch["birlik"])
+            text += f"   {ch['nomi']}: {asl:.2f} {ch['birlik']}\n"
     else:
         text += "   Ma'lumot yo'q\n"
     return text
 
 
-async def gen_moliya(boshliq, oxiri, sarlavha):
-    rev = await db.get_sales_revenue_range(boshliq, oxiri)
-    ti = await db.tannarx_hisobla()
-    A_qty, A_rev = rev["A"]
-    B_qty, B_rev = rev["B"]
-    daromad = A_rev + B_rev
-    cogs = A_qty * ti["A"] + B_qty * ti["B"]
+async def gen_moliya(boshliq, oxiri, sarlavha, product_id=None):
+    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
+    tannarx, sotuv = await _narx_maps()
+    daromad = sum(x["rev"] for x in sblk)
+    cogs = sum(x["qty"] * tannarx.get((x["product_id"], x["kod"]), 0) for x in sblk)
     foyda = daromad - cogs
     foyda_foiz = (foyda / daromad * 100) if daromad > 0 else 0.0
 
     xom = await db.ombor_xom_qiymati()
-    goods = await db.get_finished_goods()
-    A_qoldiq = next((g[1] for g in goods if g[0] == "A"), 0)
-    B_qoldiq = next((g[1] for g in goods if g[0] == "B"), 0)
-    tayyor_tannarx = A_qoldiq * ti["A"] + B_qoldiq * ti["B"]
-    sotuv_A = float(await db.get_bot_setting("sotuv_narx_A") or 0)
-    sotuv_B = float(await db.get_bot_setting("sotuv_narx_B") or 0)
-    tayyor_sotuv = A_qoldiq * sotuv_A + B_qoldiq * sotuv_B
+    goods = await db.get_all_finished_goods()
+    if product_id:
+        goods = [g for g in goods if g["product_id"] == product_id]
+    tayyor_tannarx = sum(g["qoldiq"] * tannarx.get((g["product_id"], g["kod"]), 0) for g in goods)
+    tayyor_sotuv = sum(g["qoldiq"] * sotuv.get((g["product_id"], g["kod"]), 0) for g in goods)
     kod = await val.get_active()
 
     text = (
         f"💰 Moliya hisoboti ({sarlavha})\n"
         f"📅 {boshliq} — {oxiri}\n"
         f"💱 Valyuta: {val.belgi(kod)} ({kod})\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
-        f"📈 SOTUV:\n"
-        f"   A: {A_qty} ta = {await val.format_uzs(A_rev)}\n"
-        f"   B: {B_qty} ta = {await val.format_uzs(B_rev)}\n"
-        f"   Daromad: {await val.format_uzs(daromad)}\n\n"
+        f"━━━━━━━━━━━━━━━━\n\n📈 SOTUV:\n")
+    for pid, info in _group_by_product(sblk).items():
+        text += f"   {info['nomi']}:\n"
+        for it in info["items"]:
+            text += f"      {it['blok_nomi']}: {it['qty']} ta = {await val.format_uzs(it['rev'])}\n"
+    text += (
+        f"\n   Daromad: {await val.format_uzs(daromad)}\n"
         f"📉 Tannarx (COGS): {await val.format_uzs(cogs)}\n"
         f"💵 Sof foyda: {await val.format_uzs(foyda)} ({foyda_foiz:.1f}%)\n\n"
-        f"🧱 1 blok tannarxi:\n"
-        f"   A: {await val.format_uzs(ti['A'])} | sotuv: {await val.format_uzs(sotuv_A)}\n"
-        f"   B: {await val.format_uzs(ti['B'])} | sotuv: {await val.format_uzs(sotuv_B)}\n\n"
         f"🏪 Ombor qiymati (xom ashyo): {await val.format_uzs(xom)}\n"
         f"🏬 Tayyor mahsulot:\n"
         f"   Tannarxda: {await val.format_uzs(tayyor_tannarx)}\n"
-        f"   Sotuv narxida: {await val.format_uzs(tayyor_sotuv)}"
-    )
-
-    # Kunlik daromad/foyda jadvali (sotuv bo'lgan kunlar)
-    daily = await db.get_sales_daily(boshliq, oxiri)
-    if daily:
-        text += "\n\n📅 KUNLIK (daromad | foyda):\n"
-        for d in daily[-20:]:
-            cogs_d = d["A"] * ti["A"] + d["B"] * ti["B"]
-            foyda_d = d["rev"] - cogs_d
-            kun = str(d["sana"])[5:]  # MM-DD
-            text += (
-                f"   {kun}: {await val.format_uzs(d['rev'])} | "
-                f"{await val.format_uzs(foyda_d)}\n"
-            )
+        f"   Sotuv narxida: {await val.format_uzs(tayyor_sotuv)}")
     return text
 
 
-async def gen_ishchi(boshliq, oxiri, sarlavha):
+async def gen_ishchi(boshliq, oxiri, sarlavha, product_id=None):
     prod = await db.get_production_by_user_range(boshliq, oxiri)
     sales = await db.get_sales_by_user_range(boshliq, oxiri)
-    ishchi_haqi = float(await db.get_bot_setting("ishchi_haqi_qolip") or 0)
 
-    text = (
-        f"👷 Ishchilar hisoboti ({sarlavha})\n"
-        f"📅 {boshliq} — {oxiri}\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
-        f"🏭 ISHLAB CHIQARISH (ishbay haq):\n"
-    )
+    text = (f"👷 Ishchilar hisoboti ({sarlavha})\n📅 {boshliq} — {oxiri}\n"
+            f"━━━━━━━━━━━━━━━━\n\n🏭 ISHLAB CHIQARISH (ishbay haq):\n")
     if prod:
         for p in prod:
-            haq = p["qolip"] * ishchi_haqi
-            text += (
-                f"   {p['ism']}: {p['qolip']} qolip "
-                f"(A:{p['A']} B:{p['B']})\n"
-                f"      💵 Ish haqi: {await val.format_uzs(haq)}\n"
-            )
+            text += (f"   {p['ism']}: {p['qolip']} qolip\n"
+                     f"      💵 Ish haqi: {await val.format_uzs(p['haq'])}\n")
     else:
         text += "   Ma'lumot yo'q\n"
 
@@ -339,48 +331,38 @@ async def gen_ishchi(boshliq, oxiri, sarlavha):
     return text
 
 
-async def _metrikalar(boshliq, oxiri):
-    prod = await db.get_production_range(boshliq, oxiri)
-    jami_qolip, A, B, _, _, _ = hisobla_production(prod)
-    rev = await db.get_sales_revenue_range(boshliq, oxiri)
-    ti = await db.tannarx_hisobla()
-    A_qty, A_rev = rev["A"]
-    B_qty, B_rev = rev["B"]
-    daromad = A_rev + B_rev
-    cogs = A_qty * ti["A"] + B_qty * ti["B"]
-    return {
-        "qolip": jami_qolip, "A": A, "B": B,
-        "sotuv": A_qty + B_qty, "daromad": daromad, "foyda": daromad - cogs,
-    }
+async def _metrikalar(boshliq, oxiri, product_id=None):
+    qol = await db.get_production_qolip_range(boshliq, oxiri, product_id)
+    jami_qolip = sum(v["qolip"] for v in qol.values())
+    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
+    tannarx, _ = await _narx_maps()
+    daromad = sum(x["rev"] for x in sblk)
+    sotildi = sum(x["qty"] for x in sblk)
+    cogs = sum(x["qty"] * tannarx.get((x["product_id"], x["kod"]), 0) for x in sblk)
+    return {"qolip": jami_qolip, "sotuv": sotildi,
+            "daromad": daromad, "foyda": daromad - cogs}
 
 
-async def gen_taqqos(boshliq, oxiri, sarlavha):
+async def gen_taqqos(boshliq, oxiri, sarlavha, product_id=None):
     pb, po = oldingi_davr(boshliq, oxiri)
-    cur = await _metrikalar(boshliq, oxiri)
-    prev = await _metrikalar(pb, po)
+    cur = await _metrikalar(boshliq, oxiri, product_id)
+    prev = await _metrikalar(pb, po, product_id)
     return (
-        f"📈 Taqqoslash: {sarlavha}\n"
-        f"📅 {boshliq} — {oxiri}\n"
-        f"   (oldingi davr: {pb} — {po})\n"
-        f"━━━━━━━━━━━━━━━━\n\n"
+        f"📈 Taqqoslash: {sarlavha}\n📅 {boshliq} — {oxiri}\n"
+        f"   (oldingi davr: {pb} — {po})\n━━━━━━━━━━━━━━━━\n\n"
         f"🏭 Jami qolip: {cur['qolip']} {_delta(cur['qolip'], prev['qolip'])}\n"
-        f"   A ishlab ch.: {cur['A']} {_delta(cur['A'], prev['A'])}\n"
-        f"   B ishlab ch.: {cur['B']} {_delta(cur['B'], prev['B'])}\n\n"
         f"💰 Sotuv (dona): {cur['sotuv']} {_delta(cur['sotuv'], prev['sotuv'])}\n"
         f"   Daromad: {await val.format_uzs(cur['daromad'])} "
         f"{_delta(cur['daromad'], prev['daromad'])}\n"
         f"   Foyda: {await val.format_uzs(cur['foyda'])} "
-        f"{_delta(cur['foyda'], prev['foyda'])}"
-    )
+        f"{_delta(cur['foyda'], prev['foyda'])}")
 
 
-async def gen_material(boshliq, oxiri, sarlavha):
-    sarf = await db.get_material_sarfi(boshliq, oxiri)
+async def gen_material(boshliq, oxiri, sarlavha, product_id=None):
+    sarf = await db.get_material_sarfi(boshliq, oxiri, product_id)
     if not sarf:
-        return (f"🧱 Material sarfi ({sarlavha})\n"
-                f"📅 {boshliq} — {oxiri}\n\n   Ma'lumot yo'q")
-    text = (f"🧱 Material sarfi ({sarlavha})\n"
-            f"📅 {boshliq} — {oxiri}\n━━━━━━━━━━━━━━━━\n\n")
+        return (f"🧱 Material sarfi ({sarlavha})\n📅 {boshliq} — {oxiri}\n\n   Ma'lumot yo'q")
+    text = (f"🧱 Material sarfi ({sarlavha})\n📅 {boshliq} — {oxiri}\n━━━━━━━━━━━━━━━━\n\n")
     jami_narx = 0.0
     for s in sarf:
         disp = db.asosiydan_birlikga(s["jami"], s["birlik"])
@@ -393,231 +375,179 @@ async def gen_material(boshliq, oxiri, sarlavha):
 
 
 # ── Excel ──
-async def _excel_yubor(target, user_id, boshliq, oxiri):
-    prod_logs = await db.get_production_range(boshliq, oxiri)
-    sales_logs = await db.get_sales_range(boshliq, oxiri)
+async def _excel_yubor(target, user_id, boshliq, oxiri, product_id=None):
+    pblk = await db.get_production_blocks_range(boshliq, oxiri, product_id)
+    qol = await db.get_production_qolip_range(boshliq, oxiri, product_id)
+    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
     materials = await db.get_materials()
-    goods = await db.get_finished_goods()
+    goods = await db.get_all_finished_goods()
+    if product_id:
+        goods = [g for g in goods if g["product_id"] == product_id]
     audit_logs = await db.get_audit_log(200)
-    prod_detail = await db.get_production_detail_range(boshliq, oxiri)
-    sales_detail = await db.get_sales_detail_range(boshliq, oxiri)
-    chiqim_logs = await db.get_material_chiqim_range(boshliq, oxiri)
+    chiqim = await db.get_material_sarfi(boshliq, oxiri, product_id)
+    tannarx, sotuv = await _narx_maps()
 
     wb = openpyxl.Workbook()
     sarlavha_font = Font(bold=True, size=11, color="FFFFFF")
     sarlavha_fill = PatternFill("solid", fgColor="2E75B6")
     markaz = Alignment(horizontal="center", vertical="center")
 
-    def sarlavha_qo(ws, qator, ustunlar):
-        for col, text in enumerate(ustunlar, 1):
-            cell = ws.cell(row=qator, column=col, value=text)
+    def hdr(ws, qator, ustunlar):
+        for col, txt in enumerate(ustunlar, 1):
+            cell = ws.cell(row=qator, column=col, value=txt)
             cell.font = sarlavha_font
             cell.fill = sarlavha_fill
             cell.alignment = markaz
 
     ws1 = wb.active
     ws1.title = "Ishlab chiqarish"
-    sarlavha_qo(ws1, 1, ["Sana", "Shablon 1", "Shablon 2", "Shablon 3", "Jami qolip", "A blok", "B blok"])
-    ws1.column_dimensions["A"].width = 14
-    sanalar = {}
-    for log in prod_logs:
-        sana = log[0]
-        sanalar.setdefault(sana, [0, 0, 0])
-        idx = log[1] - 1
-        if 0 <= idx <= 2:
-            sanalar[sana][idx] += log[2]
-    for sana, counts in sorted(sanalar.items()):
-        s1, s2, s3 = counts
-        ws1.append([sana, s1, s2, s3, s1 + s2 + s3, s1 * 12 + s3 * 11, s2 * 24 + s3 * 2])
+    hdr(ws1, 1, ["Mahsulot", "Blok", "Ishlab chiqarildi (dona)"])
+    ws1.column_dimensions["A"].width = 20
+    ws1.column_dimensions["B"].width = 22
+    for x in pblk:
+        ws1.append([x["product_nomi"], x["blok_nomi"], x["soni"]])
+    ws1.append([])
+    for pid, info in qol.items():
+        ws1.append([info["nomi"], "JAMI QOLIP", info["qolip"]])
 
-    ws2 = wb.create_sheet("Ishlab chiqarish (tafsilot)")
-    sarlavha_qo(ws2, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Shablon", "Qolip soni", "A blok", "B blok"])
-    ws2.column_dimensions["A"].width = 18
-    ws2.column_dimensions["B"].width = 16
-    for p in prod_detail:
-        shablon = p["shablon"]
-        qolip = p["qolip_soni"]
-        A = qolip * 12 if shablon == 1 else (qolip * 11 if shablon == 3 else 0)
-        B = qolip * 24 if shablon == 2 else (qolip * 2 if shablon == 3 else 0)
-        ws2.append([_vaqt_str(p["vaqt"], "%d.%m.%Y %H:%M"), p["user_ism"] or "Nomalum",
-                    p["user_rol"] or "-", shablon, qolip, A, B])
+    ws2 = wb.create_sheet("Sotuv")
+    hdr(ws2, 1, ["Mahsulot", "Blok", "Sotildi (dona)", "Daromad (so'm)"])
+    ws2.column_dimensions["A"].width = 20
+    ws2.column_dimensions["B"].width = 22
+    for x in sblk:
+        ws2.append([x["product_nomi"], x["blok_nomi"], x["qty"], round(x["rev"])])
 
-    ws3 = wb.create_sheet("Sotuv")
-    sarlavha_qo(ws3, 1, ["Sana", "A blok", "B blok", "Jami"])
-    ws3.column_dimensions["A"].width = 14
-    sotuv_sanalar = {}
-    for log in sales_logs:
-        sana = log[0]
-        sotuv_sanalar.setdefault(sana, {"A": 0, "B": 0})
-        sotuv_sanalar[sana][log[1]] += log[2]
-    for sana, counts in sorted(sotuv_sanalar.items()):
-        A = counts.get("A", 0)
-        B = counts.get("B", 0)
-        ws3.append([sana, A, B, A + B])
+    ws3 = wb.create_sheet("Xom ashyo sarfi")
+    hdr(ws3, 1, ["Material", "Ketgan miqdor", "Birlik", "Qiymat (so'm)"])
+    ws3.column_dimensions["A"].width = 20
+    for ch in chiqim:
+        asl = db.asosiydan_birlikga(ch["jami"], ch["birlik"])
+        ws3.append([ch["nomi"], round(asl, 2), ch["birlik"], round(ch["jami"] * ch["narx"])])
 
-    ws4 = wb.create_sheet("Sotuv (tafsilot)")
-    sarlavha_qo(ws4, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Blok turi", "Miqdor"])
-    ws4.column_dimensions["A"].width = 18
-    ws4.column_dimensions["B"].width = 16
-    for s in sales_detail:
-        ws4.append([_vaqt_str(s["vaqt"], "%d.%m.%Y %H:%M"), s["user_ism"] or "Nomalum",
-                    s["user_rol"] or "-", s["block_type"], s["miqdor"]])
-
-    ws5 = wb.create_sheet("Xom ashyo sarfi")
-    sarlavha_qo(ws5, 1, ["Sana", "Material", "Ketgan miqdor", "Birlik"])
-    ws5.column_dimensions["A"].width = 14
-    ws5.column_dimensions["B"].width = 20
-    for ch in chiqim_logs:
-        asl = db.asosiydan_birlikga(float(ch["jami"]), ch["birlik"])
-        ws5.append([ch["sana"], ch["material_nomi"], round(asl, 2), ch["birlik"]])
-
-    ws6 = wb.create_sheet("Ombor qoldiqlari")
-    sarlavha_qo(ws6, 1, ["Material", "Qoldiq", "Birlik"])
-    ws6.column_dimensions["A"].width = 20
+    ws4 = wb.create_sheet("Ombor qoldiqlari")
+    hdr(ws4, 1, ["Material", "Qoldiq", "Birlik"])
+    ws4.column_dimensions["A"].width = 20
     for m in materials:
-        ws6.append([m[1], round(db.asosiydan_birlikga(m[2], m[4]), 2), m[4]])
-    ws6.append([])
-    ws6.append(["── Tayyor mahsulot ──", "", ""])
+        ws4.append([m[1], round(db.asosiydan_birlikga(m[2], m[4]), 2), m[4]])
+    ws4.append([])
+    ws4.append(["── Tayyor mahsulot ──", "", ""])
     for g in goods:
-        ws6.append([f"{g[0]} blok", g[1], "ta"])
+        ws4.append([f"{g['product_nomi']} · {g['nomi']}", g["qoldiq"], "ta"])
 
-    ws7 = wb.create_sheet("Audit log")
-    sarlavha_qo(ws7, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Amal", "Tafsilot"])
-    ws7.column_dimensions["A"].width = 18
-    ws7.column_dimensions["B"].width = 16
-    ws7.column_dimensions["D"].width = 25
-    ws7.column_dimensions["E"].width = 40
-    for log in audit_logs:
-        ws7.append([_vaqt_str(log["vaqt"], "%d.%m.%Y %H:%M"), log["ism"] or "",
-                    log["rol"] or "", log["amal"] or "", log["tafsilot"] or ""])
-
-    ws8 = wb.create_sheet("Moliya")
-    sarlavha_qo(ws8, 1, ["Ko'rsatkich", "Qiymat (so'm)"])
-    ws8.column_dimensions["A"].width = 28
-    ws8.column_dimensions["B"].width = 20
-    rev = await db.get_sales_revenue_range(boshliq, oxiri)
-    ti = await db.tannarx_hisobla()
-    A_qty, A_rev = rev["A"]
-    B_qty, B_rev = rev["B"]
-    daromad = A_rev + B_rev
-    cogs = A_qty * ti["A"] + B_qty * ti["B"]
+    ws5 = wb.create_sheet("Moliya")
+    hdr(ws5, 1, ["Ko'rsatkich", "Qiymat (so'm)"])
+    ws5.column_dimensions["A"].width = 30
+    ws5.column_dimensions["B"].width = 20
+    daromad = sum(x["rev"] for x in sblk)
+    cogs = sum(x["qty"] * tannarx.get((x["product_id"], x["kod"]), 0) for x in sblk)
     xom = await db.ombor_xom_qiymati()
-    A_q = next((g[1] for g in goods if g[0] == "A"), 0)
-    B_q = next((g[1] for g in goods if g[0] == "B"), 0)
-    sotuv_A = float(await db.get_bot_setting("sotuv_narx_A") or 0)
-    sotuv_B = float(await db.get_bot_setting("sotuv_narx_B") or 0)
+    tayyor_tannarx = sum(g["qoldiq"] * tannarx.get((g["product_id"], g["kod"]), 0) for g in goods)
+    tayyor_sotuv = sum(g["qoldiq"] * sotuv.get((g["product_id"], g["kod"]), 0) for g in goods)
     for nomi_q, qiymat in [
-        ("A sotuv (dona)", A_qty), ("A daromad", round(A_rev)),
-        ("B sotuv (dona)", B_qty), ("B daromad", round(B_rev)),
         ("Jami daromad", round(daromad)), ("Tannarx (COGS)", round(cogs)),
         ("Sof foyda", round(daromad - cogs)),
-        ("1 A blok tannarxi", round(ti["A"])), ("1 B blok tannarxi", round(ti["B"])),
-        ("A sotuv narxi", round(sotuv_A)), ("B sotuv narxi", round(sotuv_B)),
         ("Ombor (xom ashyo) qiymati", round(xom)),
-        ("Tayyor mahsulot (tannarx)", round(A_q * ti["A"] + B_q * ti["B"])),
-        ("Tayyor mahsulot (sotuv)", round(A_q * sotuv_A + B_q * sotuv_B)),
+        ("Tayyor mahsulot (tannarx)", round(tayyor_tannarx)),
+        ("Tayyor mahsulot (sotuv)", round(tayyor_sotuv)),
     ]:
-        ws8.append([nomi_q, qiymat])
+        ws5.append([nomi_q, qiymat])
+
+    ws6 = wb.create_sheet("Audit log")
+    hdr(ws6, 1, ["Vaqt", "Foydalanuvchi", "Rol", "Amal", "Tafsilot"])
+    ws6.column_dimensions["A"].width = 18
+    ws6.column_dimensions["B"].width = 16
+    ws6.column_dimensions["D"].width = 25
+    ws6.column_dimensions["E"].width = 40
+    for log in audit_logs:
+        ws6.append([_vaqt_str(log["vaqt"], "%d.%m.%Y %H:%M"), log["ism"] or "",
+                    log["rol"] or "", log["amal"] or "", log["tafsilot"] or ""])
 
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
-    fayl_nomi = f"gazobot_{boshliq}_{oxiri}.xlsx"
-    caption = await t(f"📥 Excel hisobot\n📅 {boshliq} — {oxiri}\n8 ta varaq", user_id)
+    fayl_nomi = f"hisobot_{boshliq}_{oxiri}.xlsx"
+    caption = await t(f"📥 Excel hisobot\n📅 {boshliq} — {oxiri}", user_id)
     await target.answer_document(
-        BufferedInputFile(buffer.read(), filename=fayl_nomi), caption=caption
-    )
+        BufferedInputFile(buffer.read(), filename=fayl_nomi), caption=caption)
 
 
 # ── Grafiklar ──
-async def _grafik_yubor(target, user_id, boshliq, oxiri):
+async def _grafik_yubor(target, user_id, boshliq, oxiri, product_id=None):
     if not charts.MATPLOTLIB:
-        await _yubor(target, user_id,
-                     "❌ Grafik moduli mavjud emas (matplotlib o'rnatilmagan).")
+        await _yubor(target, user_id, "❌ Grafik moduli mavjud emas (matplotlib o'rnatilmagan).")
         return
-    prod_daily = await db.get_production_daily(boshliq, oxiri)
-    sales_daily = await db.get_sales_daily(boshliq, oxiri)
+    prod_daily = await db.get_production_daily(boshliq, oxiri, product_id)
+    sales_daily = await db.get_sales_daily(boshliq, oxiri, product_id)
     if not prod_daily and not sales_daily:
         await _yubor(target, user_id, "📊 Bu davrda ma'lumot yo'q.")
         return
 
-    sanalar = sorted(set([d["sana"] for d in prod_daily]
-                         + [d["sana"] for d in sales_daily]))
+    sanalar = sorted(set([d["sana"] for d in prod_daily] + [d["sana"] for d in sales_daily]))
     prod_map = {d["sana"]: d for d in prod_daily}
     sales_map = {d["sana"]: d for d in sales_daily}
-    labels = [str(s)[5:] for s in sanalar]  # MM-DD
+    labels = [str(s)[5:] for s in sanalar]
     qolip_vals = [prod_map.get(s, {}).get("qolip", 0) for s in sanalar]
     sotuv_vals = [sales_map.get(s, {}).get("qty", 0) for s in sanalar]
 
-    # 1. Trend
-    png = charts.trend_chart(labels, qolip_vals, sotuv_vals,
-                             "Ishlab chiqarish va sotuv")
+    png = charts.trend_chart(labels, qolip_vals, sotuv_vals, "Ishlab chiqarish va sotuv")
     if png:
         cap = await t("📈 Ishlab chiqarish va sotuv trendi", user_id)
         await target.answer_photo(BufferedInputFile(png, "trend.png"), caption=cap)
 
-    # 2. Ishlab chiqarish A/B (pie)
-    totA = sum(prod_map.get(s, {}).get("A", 0) for s in sanalar)
-    totB = sum(prod_map.get(s, {}).get("B", 0) for s in sanalar)
-    png2 = charts.pie_chart(totA, totB, "Ishlab chiqarish (A/B)")
-    if png2:
-        cap = await t("🥧 Ishlab chiqarish taqsimoti (A/B)", user_id)
-        await target.answer_photo(BufferedInputFile(png2, "pie.png"), caption=cap)
+    # Kunlik daromad va (taqribiy) foyda
+    sblk = await db.get_sales_blocks_range(boshliq, oxiri, product_id)
+    tannarx, _ = await _narx_maps()
+    daromad_jami = sum(x["rev"] for x in sblk)
+    cogs_jami = sum(x["qty"] * tannarx.get((x["product_id"], x["kod"]), 0) for x in sblk)
+    margin = ((daromad_jami - cogs_jami) / daromad_jami) if daromad_jami > 0 else 0.0
 
-    # 3. Kunlik daromad va foyda (bar) — faol valyutaga o'girilgan
     kod = await val.get_active()
     rate = await val.get_rate(kod)
     conv = (lambda x: x) if (kod == val.ASOS or not rate) else (lambda x: x / rate)
-    ti = await db.tannarx_hisobla()
     rev_vals, profit_vals = [], []
     for s in sanalar:
-        sd = sales_map.get(s, {})
-        rev = sd.get("rev", 0)
-        cogs = sd.get("A", 0) * ti["A"] + sd.get("B", 0) * ti["B"]
+        rev = sales_map.get(s, {}).get("rev", 0)
         rev_vals.append(round(conv(rev), 2))
-        profit_vals.append(round(conv(rev - cogs), 2))
-    if any(rev_vals) or any(profit_vals):
+        profit_vals.append(round(conv(rev * margin), 2))
+    if any(rev_vals):
         png3 = charts.finance_bar(labels, rev_vals, profit_vals, val.belgi(kod))
         if png3:
-            cap = await t("📊 Kunlik daromad va foyda", user_id)
+            cap = await t("📊 Kunlik daromad va (taqribiy) foyda", user_id)
             await target.answer_photo(BufferedInputFile(png3, "finance.png"), caption=cap)
 
 
-# ── CSV / PDF eksport ──
-async def _csv_yubor(target, user_id, boshliq, oxiri):
-    prod = await db.get_production_daily(boshliq, oxiri)
-    sales = await db.get_sales_daily(boshliq, oxiri)
+# ── CSV / PDF ──
+async def _csv_yubor(target, user_id, boshliq, oxiri, product_id=None):
+    prod = await db.get_production_daily(boshliq, oxiri, product_id)
+    sales = await db.get_sales_daily(boshliq, oxiri, product_id)
     pmap = {d["sana"]: d for d in prod}
     smap = {d["sana"]: d for d in sales}
     sanalar = sorted(set(list(pmap.keys()) + list(smap.keys())))
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["Sana", "Qolip", "A ishlab ch.", "B ishlab ch.",
-                "A sotuv", "B sotuv", "Daromad (so'm)"])
+    w.writerow(["Sana", "Qolip", "Sotuv (dona)", "Daromad (so'm)"])
     for s in sanalar:
         p = pmap.get(s, {})
         sd = smap.get(s, {})
-        w.writerow([s, p.get("qolip", 0), p.get("A", 0), p.get("B", 0),
-                    sd.get("A", 0), sd.get("B", 0), round(sd.get("rev", 0))])
-    data = ("\ufeff" + out.getvalue()).encode("utf-8")  # BOM — Excel uchun
-    fn = f"gazobot_{boshliq}_{oxiri}.csv"
+        w.writerow([s, p.get("qolip", 0), sd.get("qty", 0), round(sd.get("rev", 0))])
+    data = ("\ufeff" + out.getvalue()).encode("utf-8")
+    fn = f"hisobot_{boshliq}_{oxiri}.csv"
     cap = await t("📄 CSV eksport", user_id)
     await target.answer_document(BufferedInputFile(data, fn), caption=cap)
 
 
-async def _pdf_yubor(target, user_id, boshliq, oxiri):
+async def _pdf_yubor(target, user_id, boshliq, oxiri, product_id=None):
     if not charts.MATPLOTLIB:
-        await _yubor(target, user_id,
-                     "❌ PDF moduli mavjud emas (matplotlib o'rnatilmagan).")
+        await _yubor(target, user_id, "❌ PDF moduli mavjud emas (matplotlib o'rnatilmagan).")
         return
-    umumiy = await hisobot_matni(boshliq, oxiri, "Umumiy hisobot")
-    moliya = await gen_moliya(boshliq, oxiri, "Moliya")
+    umumiy = await hisobot_matni(boshliq, oxiri, "Umumiy hisobot", product_id)
+    moliya = await gen_moliya(boshliq, oxiri, "Moliya", product_id)
     body = await t(umumiy + "\n\n" + moliya, user_id)
-    png = charts.text_pdf("Gazoblok hisobot", body)
+    png = charts.text_pdf("Hisobot", body)
     if not png:
         await _yubor(target, user_id, "❌ PDF yaratilmadi.")
         return
-    fn = f"gazobot_{boshliq}_{oxiri}.pdf"
+    fn = f"hisobot_{boshliq}_{oxiri}.pdf"
     cap = await t("📄 PDF eksport", user_id)
     await target.answer_document(BufferedInputFile(png, fn), caption=cap)
 
@@ -630,34 +560,36 @@ async def _yubor(target, user_id, matn):
     await target.answer(tt)
 
 
-async def _generate(target, user_id, rtype, boshliq, oxiri, sarlavha):
+async def _generate(target, user_id, rtype, boshliq, oxiri, sarlavha, product_id=None):
     try:
+        if product_id:
+            sarlavha = f"{await _label_pid(product_id)} · {sarlavha}"
         if rtype == "excel":
-            await _excel_yubor(target, user_id, boshliq, oxiri)
+            await _excel_yubor(target, user_id, boshliq, oxiri, product_id)
             return
         if rtype == "grafik":
-            await _grafik_yubor(target, user_id, boshliq, oxiri)
+            await _grafik_yubor(target, user_id, boshliq, oxiri, product_id)
             return
         if rtype == "csv":
-            await _csv_yubor(target, user_id, boshliq, oxiri)
+            await _csv_yubor(target, user_id, boshliq, oxiri, product_id)
             return
         if rtype == "pdf":
-            await _pdf_yubor(target, user_id, boshliq, oxiri)
+            await _pdf_yubor(target, user_id, boshliq, oxiri, product_id)
             return
         if rtype == "umumiy":
-            matn = await hisobot_matni(boshliq, oxiri, f"📊 {sarlavha}")
+            matn = await hisobot_matni(boshliq, oxiri, f"📊 {sarlavha}", product_id)
         elif rtype == "tafsil":
-            matn = await gen_tafsil(boshliq, oxiri, sarlavha)
+            matn = await gen_tafsil(boshliq, oxiri, sarlavha, product_id)
         elif rtype == "moliya":
-            matn = await gen_moliya(boshliq, oxiri, sarlavha)
+            matn = await gen_moliya(boshliq, oxiri, sarlavha, product_id)
         elif rtype == "ishchi":
-            matn = await gen_ishchi(boshliq, oxiri, sarlavha)
+            matn = await gen_ishchi(boshliq, oxiri, sarlavha, product_id)
         elif rtype == "material":
-            matn = await gen_material(boshliq, oxiri, sarlavha)
+            matn = await gen_material(boshliq, oxiri, sarlavha, product_id)
         elif rtype == "taqqos":
-            matn = await gen_taqqos(boshliq, oxiri, sarlavha)
+            matn = await gen_taqqos(boshliq, oxiri, sarlavha, product_id)
         else:
-            matn = await hisobot_matni(boshliq, oxiri, sarlavha)
+            matn = await hisobot_matni(boshliq, oxiri, sarlavha, product_id)
         await _yubor(target, user_id, matn)
     except Exception as e:
         log_exc("report_generate", e)
@@ -671,22 +603,25 @@ async def _ruxsat(user_id, rtype):
     if user["rol"] == "superadmin":
         return True
     perm = "excel_hisobot" if rtype in ("excel", "csv", "pdf") else (
-        "moliya_korish" if rtype in ("moliya", "ishchi") else "hisobot_korish"
-    )
+        "moliya_korish" if rtype in ("moliya", "ishchi") else "hisobot_korish")
     return await db.has_permission(user_id, user["rol"], perm)
 
 
-# ── Kirish (reply tugmalari → davr tanlovchi) ──
+# ── Kirish ──
 @router.message(Tkey("📊 Hisobot"))
 async def hisobot(message: Message):
     await say(message, "📊 Hisobotlar:", reply_markup=await reports_menu(message.from_user.id))
 
 
 async def _davr_sorov(message, rtype):
-    await say(
-        message, "📅 Davrni tanlang:",
-        reply_markup=await davr_keyboard(message.from_user.id, rtype)
-    )
+    user_id = message.from_user.id
+    prods = await db.get_mahsulotlar(faqat_faol=False)
+    if len(prods) <= 1:
+        await say(message, "📅 Davrni tanlang:",
+                  reply_markup=await davr_keyboard(user_id, rtype, "all"))
+    else:
+        await say(message, "📦 Mahsulotni tanlang:",
+                  reply_markup=await product_filter_keyboard(user_id, rtype))
 
 
 @router.message(Tkey("📊 Umumiy hisobot"))
@@ -739,12 +674,29 @@ async def pdf_entry(message: Message):
     await _davr_sorov(message, "pdf")
 
 
+# ── Mahsulot tanlash callback ──
+@router.callback_query(lambda c: c.data and c.data.startswith("repp:"))
+async def repp_callback(callback: CallbackQuery):
+    parts = callback.data.split(":")
+    rtype = parts[1] if len(parts) > 1 else "umumiy"
+    pid_str = parts[2] if len(parts) > 2 else "all"
+    if not await _ruxsat(callback.from_user.id, rtype):
+        await callback.answer("⛔", show_alert=False)
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        await t("📅 Davrni tanlang:", callback.from_user.id),
+        reply_markup=await davr_keyboard(callback.from_user.id, rtype, pid_str))
+
+
 # ── Davr callback ──
 @router.callback_query(lambda c: c.data and c.data.startswith("rep:"))
 async def rep_callback(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
     rtype = parts[1] if len(parts) > 1 else "umumiy"
-    period = parts[2] if len(parts) > 2 else "bugun"
+    pid_str = parts[2] if len(parts) > 2 else "all"
+    period = parts[3] if len(parts) > 3 else "bugun"
+    product_id = None if pid_str == "all" else int(pid_str)
 
     if not await _ruxsat(callback.from_user.id, rtype):
         await callback.answer("⛔", show_alert=False)
@@ -753,17 +705,17 @@ async def rep_callback(callback: CallbackQuery, state: FSMContext):
 
     if period == "custom":
         await state.clear()
-        await state.update_data(rtype=rtype)
+        await state.update_data(rtype=rtype, product_id=product_id)
         await state.set_state(CustomRange.sana)
         xabar = await t(
             "📅 Davrni kiriting (YYYY-MM-DD YYYY-MM-DD):\nMisol: 2026-06-01 2026-06-15",
-            callback.from_user.id
-        )
+            callback.from_user.id)
         await callback.message.answer(xabar)
         return
 
     boshliq, oxiri, sarlavha = davr_oraligi(period)
-    await _generate(callback.message, callback.from_user.id, rtype, boshliq, oxiri, sarlavha)
+    await _generate(callback.message, callback.from_user.id, rtype,
+                    boshliq, oxiri, sarlavha, product_id)
 
 
 @router.message(CustomRange.sana)
@@ -778,17 +730,14 @@ async def custom_sana(message: Message, state: FSMContext):
             b, o = o, b
         data = await state.get_data()
         rtype = data.get("rtype", "umumiy")
+        product_id = data.get("product_id")
         await state.clear()
-        await _generate(message, message.from_user.id, rtype, b, o, f"{b} — {o}")
+        await _generate(message, message.from_user.id, rtype, b, o, f"{b} — {o}", product_id)
     except ValueError:
-        await say(
-            message,
-            "❌ Format: YYYY-MM-DD YYYY-MM-DD\nMisol: 2026-06-01 2026-06-15"
-        )
+        await say(message, "❌ Format: YYYY-MM-DD YYYY-MM-DD\nMisol: 2026-06-01 2026-06-15")
 
 
 async def avtomatik_hisobot(bot, chat_id, turi="kun"):
-    """Avtomatik hisobot yuborish. turi: kun | hafta | oy."""
     try:
         if turi == "hafta":
             b, o, _ = davr_oraligi("ohafta")
@@ -800,7 +749,7 @@ async def avtomatik_hisobot(bot, chat_id, turi="kun"):
             bugun = db.bugungi_sana()
             b = o = bugun
             sarlavha = "🔔 Avtomatik kunlik hisobot"
-        text = await hisobot_matni(b, o, sarlavha)
+        text = await hisobot_matni(b, o, sarlavha, None)
         text = await t(text, chat_id)
         await bot.send_message(chat_id, text)
     except Exception as e:

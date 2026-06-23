@@ -10,7 +10,7 @@ import csv
 import io
 import database as db
 import valyuta as val
-from translation import Tkey, canon, eq, say, say_error, esc, build_keyboard, t
+from translation import Tkey, canon, say, say_error, esc, build_keyboard, t
 
 router = Router()
 
