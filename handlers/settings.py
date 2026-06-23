@@ -663,29 +663,82 @@ async def pin_kod(message: Message):
     )
 
 
+# ── PIN o'rnatish (inline keypad — PIN chatda qolmaydi) ──
+_setpin = {}  # {user_id: kiritilayotgan raqamlar}
+
+
+def _setpin_markup():
+    def b(matn, kod):
+        return InlineKeyboardButton(text=matn, callback_data=kod)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [b("1", "setpin_d_1"), b("2", "setpin_d_2"), b("3", "setpin_d_3")],
+        [b("4", "setpin_d_4"), b("5", "setpin_d_5"), b("6", "setpin_d_6")],
+        [b("7", "setpin_d_7"), b("8", "setpin_d_8"), b("9", "setpin_d_9")],
+        [b("⌫", "setpin_del"), b("0", "setpin_d_0"), b("✅", "setpin_ok")],
+    ])
+
+
+async def _setpin_text(uid, entered):
+    base = await t("🔑 Yangi PIN (4–8 raqam) — tugmalardan kiriting:", uid)
+    dots = ("● " * len(entered)).strip() or "— — — —"
+    return f"{base}\n\n{dots}"
+
+
 @router.message(Tkey("🔑 PIN o'rnatish"))
 async def pin_ornatish(message: Message, state: FSMContext):
     if not await _faqat_super(message):
         return
     await state.clear()
-    await state.set_state(PinState.kod)
-    await say(message, "Yangi PIN kodni kiriting (4–8 raqam):\nMisol: 1234")
+    _setpin[message.from_user.id] = ""
+    await message.answer(
+        await _setpin_text(message.from_user.id, ""),
+        reply_markup=_setpin_markup())
 
 
-@router.message(PinState.kod)
-async def pin_saqlash(message: Message, state: FSMContext):
-    kod = message.text.strip()
-    if not (kod.isdigit() and 4 <= len(kod) <= 8):
-        await say(message, "❌ PIN 4–8 raqamdan iborat bo'lishi kerak! Misol: 1234")
+@router.callback_query(lambda c: c.data and c.data.startswith("setpin_"))
+async def setpin_cb(callback: CallbackQuery):
+    user = await db.get_user(callback.from_user.id)
+    if not user or user["rol"] != "superadmin":
+        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
         return
-    pin_h = hashlib.sha256(kod.encode("utf-8")).hexdigest()
-    await db.set_bot_setting("pin_hash", pin_h)
-    if not await db.get_bot_setting("pin_timeout"):
-        await db.set_bot_setting("pin_timeout", "5")
-    await state.clear()
-    await _audit_pin(message, "PIN o'rnatildi/yangilandi")
-    await say(message, "✅ PIN kod o'rnatildi!",
-              reply_markup=await pin_menu(message.from_user.id))
+    uid = callback.from_user.id
+    entered = _setpin.get(uid, "")
+    data = callback.data
+
+    if data.startswith("setpin_d_"):
+        if len(entered) < 8:
+            entered += data.rsplit("_", 1)[-1]
+    elif data == "setpin_del":
+        entered = entered[:-1]
+    elif data == "setpin_ok":
+        if not (4 <= len(entered) <= 8):
+            await callback.answer("❌ PIN 4–8 raqam bo'lsin!", show_alert=True)
+            return
+        pin_h = hashlib.sha256(entered.encode("utf-8")).hexdigest()
+        await db.set_bot_setting("pin_hash", pin_h)
+        if not await db.get_bot_setting("pin_timeout"):
+            await db.set_bot_setting("pin_timeout", "5")
+        _setpin.pop(uid, None)
+        u = await db.get_user(uid)
+        await db.add_audit_log(uid, u["ism"] if u else "-",
+                               u["rol"] if u else "-",
+                               "PIN o'rnatildi/yangilandi", "")
+        try:
+            await callback.message.edit_text(await t("✅ PIN kod o'rnatildi!", uid))
+        except Exception:
+            pass
+        await callback.message.answer(
+            await t("🔒 PIN kod:", uid), reply_markup=await pin_menu(uid))
+        await callback.answer()
+        return
+
+    _setpin[uid] = entered
+    try:
+        await callback.message.edit_text(
+            await _setpin_text(uid, entered), reply_markup=_setpin_markup())
+    except Exception:
+        pass
+    await callback.answer()
 
 
 @router.message(Tkey("⏱ Qulflanish vaqti"))

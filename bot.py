@@ -38,10 +38,104 @@ dp = Dispatcher()
 
 # ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
 _pin_holat = {}
+# PIN inline-keypad holati (xotirada): {user_id: kiritilayotgan_raqamlar}
+_pin_kiritish = {}
+# Har bir foydalanuvchining joriy keypad xabari id: {user_id: message_id}
+_pin_msg = {}
 
 
 def pin_hash(pin: str) -> str:
     return hashlib.sha256(pin.encode("utf-8")).hexdigest()
+
+
+def pin_keypad_markup():
+    """PIN kiritish uchun inline raqamli klaviatura (chatga matn yozilmaydi)."""
+    def b(matn, kod):
+        return InlineKeyboardButton(text=matn, callback_data=kod)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [b("1", "pin_d_1"), b("2", "pin_d_2"), b("3", "pin_d_3")],
+        [b("4", "pin_d_4"), b("5", "pin_d_5"), b("6", "pin_d_6")],
+        [b("7", "pin_d_7"), b("8", "pin_d_8"), b("9", "pin_d_9")],
+        [b("⌫", "pin_del"), b("0", "pin_d_0"), b("✅", "pin_ok")],
+    ])
+
+
+async def _pin_text(uid, entered):
+    base = await t("🔒 Bot qulflangan.\nPIN kodni tugmalar orqali kiriting:", uid)
+    dots = ("● " * len(entered)).strip() or "— — — —"
+    return f"{base}\n\n{dots}"
+
+
+async def _pin_keypad_yubor(chat_id, uid):
+    """Bitta keypad xabarini ko'rsatadi (avvalgisini o'chirib)."""
+    prev = _pin_msg.get(uid)
+    if prev:
+        try:
+            await bot.delete_message(chat_id, prev)
+        except Exception:
+            pass
+    _pin_kiritish[uid] = ""
+    sent = await bot.send_message(
+        chat_id, await _pin_text(uid, ""), reply_markup=pin_keypad_markup())
+    _pin_msg[uid] = sent.message_id
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("pin_"))
+async def pin_keypad_cb(callback: CallbackQuery):
+    uid = callback.from_user.id
+    user = await db.get_user(uid)
+    if not user or not user["faol"]:
+        await callback.answer()
+        return
+    saqlangan = await db.get_bot_setting("pin_hash")
+    if not saqlangan:
+        # PIN o'chirilgan — keypad keraksiz
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.answer()
+        return
+
+    entered = _pin_kiritish.get(uid, "")
+    data = callback.data
+
+    if data.startswith("pin_d_"):
+        if len(entered) < 8:
+            entered += data.rsplit("_", 1)[-1]
+    elif data == "pin_del":
+        entered = entered[:-1]
+    elif data == "pin_ok":
+        if pin_hash(entered) == saqlangan:
+            _pin_holat[uid] = time.time()
+            _pin_kiritish.pop(uid, None)
+            _pin_msg.pop(uid, None)
+            try:
+                await callback.message.edit_text(await t("🔓 Qulf ochildi!", uid))
+            except Exception:
+                pass
+            menu = await get_menu(uid, user["rol"])
+            await callback.message.answer(
+                await t("🏠 Asosiy menyu:", uid), reply_markup=menu)
+            await callback.answer()
+            return
+        # Noto'g'ri PIN — tozalaymiz
+        _pin_kiritish[uid] = ""
+        try:
+            await callback.message.edit_text(
+                await _pin_text(uid, ""), reply_markup=pin_keypad_markup())
+        except Exception:
+            pass
+        await callback.answer(await t("❌ Noto'g'ri PIN!", uid), show_alert=True)
+        return
+
+    _pin_kiritish[uid] = entered
+    try:
+        await callback.message.edit_text(
+            await _pin_text(uid, entered), reply_markup=pin_keypad_markup())
+    except Exception:
+        pass
+    await callback.answer()
 
 
 # Til tanlash klaviaturasi (inline)
@@ -175,17 +269,13 @@ class PermissionMiddleware(BaseMiddleware):
             oxirgi = _pin_holat.get(event.from_user.id)
             qulflangan = (oxirgi is None) or (hozir - oxirgi > timeout)
             if qulflangan:
-                kiritilgan = (event.text or "").strip()
-                if kiritilgan and pin_hash(kiritilgan) == saqlangan_hash:
-                    _pin_holat[event.from_user.id] = hozir
-                    menu = await get_menu(event.from_user.id, user["rol"])
-                    await event.answer(
-                        await t("🔓 Qulf ochildi!", event.from_user.id),
-                        reply_markup=menu
-                    )
-                    return
-                await event.answer(await t(
-                    "🔒 Bot qulflangan. PIN kodni kiriting:", event.from_user.id))
+                # Xavfsizlik: foydalanuvchi yozgan matnni o'chiramiz
+                # (PIN yoki boshqa matn chatda qolib ketmasin)
+                try:
+                    await event.delete()
+                except Exception:
+                    pass
+                await _pin_keypad_yubor(event.chat.id, event.from_user.id)
                 return
             # Faol — vaqtni yangilaymiz
             _pin_holat[event.from_user.id] = hozir
