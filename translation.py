@@ -361,6 +361,34 @@ async def build_keyboard(
     )
 
 
+async def build_mixed_keyboard(
+    user_id: int,
+    dinamik_rows: List[List[str]],
+    static_rows: List[List[str]],
+    resize: bool = True,
+) -> ReplyKeyboardMarkup:
+    """
+    Aralash klaviatura: dinamik (xom, tarjima qilinMAYDIGAN — masalan mahsulot
+    nomlari) + statik (kanonik o'zbekcha, foydalanuvchi tiliga tarjima qilinadigan)
+    tugmalardan iborat ReplyKeyboard quradi.
+
+    Bu yordamchi avval production/sales/finished_goods/inventory handlerlarida
+    nusxalangan lokal `_kb` o'rnini bosadi (DRY).
+    """
+    for row in static_rows:
+        register_ui(*row)
+    til = await foydalanuvchi_tili(user_id)
+    kb: list = []
+    for row in dinamik_rows:
+        kb.append([KeyboardButton(text=s) for s in row])
+    for row in static_rows:
+        kb.append([
+            KeyboardButton(text=(s if til == "uz" else await tarjima_qil(s, til)))
+            for s in row
+        ])
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=resize)
+
+
 async def say(message: Message, text: str, **kwargs):
     """
     Matnni foydalanuvchi tiliga tarjima qilib yuborish.

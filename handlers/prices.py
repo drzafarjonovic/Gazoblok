@@ -44,8 +44,9 @@ async def narxlar_menu(user_id):
     ])
 
 
-async def _faqat_superadmin(message: Message) -> bool:
-    user = await db.get_user(message.from_user.id)
+async def _faqat_superadmin(message: Message, user=None) -> bool:
+    if user is None:
+        user = await db.get_user(message.from_user.id)
     if not user or not user["faol"]:
         await say(message, "❌ Ruxsat yo'q!")
         return False
@@ -81,8 +82,8 @@ def valyuta_keyboard():
 
 # ── Asosiy kirish ──
 @router.message(Tkey("💵 Narxlar va valyuta"))
-async def narxlar(message: Message):
-    if not await _faqat_superadmin(message):
+async def narxlar(message: Message, user: dict = None):
+    if not await _faqat_superadmin(message, user):
         return
     kod = await val.get_active()
     await say(
@@ -94,8 +95,8 @@ async def narxlar(message: Message):
 
 # ── Valyuta tanlash ──
 @router.message(Tkey("💱 Valyuta"))
-async def valyuta_tanlash(message: Message):
-    if not await _faqat_superadmin(message):
+async def valyuta_tanlash(message: Message, user: dict = None):
+    if not await _faqat_superadmin(message, user):
         return
     kod = await val.get_active()
     await say(
@@ -108,8 +109,8 @@ async def valyuta_tanlash(message: Message):
 
 
 @router.message(Tkey("✍️ Qo'lda kurs kiritish"))
-async def qol_kurs(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
+async def qol_kurs(message: Message, state: FSMContext, user: dict = None):
+    if not await _faqat_superadmin(message, user):
         return
     await state.clear()
     await state.set_state(QolKursState.qiymat)
@@ -194,8 +195,8 @@ async def _material_narx_kb(user_id):
 
 
 @router.message(Tkey("📦 Material narxlari"))
-async def material_narxlari(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
+async def material_narxlari(message: Message, state: FSMContext, user: dict = None):
+    if not await _faqat_superadmin(message, user):
         return
     await state.clear()
     kb, materials = await _material_narx_kb(message.from_user.id)
@@ -354,8 +355,8 @@ async def _mahsulot_narx_detail(pid):
 
 
 @router.message(Tkey("🏷 Mahsulot narxlari"))
-async def mahsulot_narxlari(message: Message, state: FSMContext):
-    if not await _faqat_superadmin(message):
+async def mahsulot_narxlari(message: Message, state: FSMContext, user: dict = None):
+    if not await _faqat_superadmin(message, user):
         return
     await state.clear()
     prods = await db.get_mahsulotlar(faqat_faol=False)

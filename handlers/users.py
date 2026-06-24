@@ -68,8 +68,9 @@ async def users_menu(user_id):
     ])
 
 
-async def _ruxsat(message: Message) -> bool:
-    user = await db.get_user(message.from_user.id)
+async def _ruxsat(message: Message, user=None) -> bool:
+    if user is None:
+        user = await db.get_user(message.from_user.id)
     if not user or not user["faol"]:
         await say(message, "❌ Ruxsat yo'q!")
         return False
@@ -95,8 +96,9 @@ async def _xabar_ber(bot, uid, matn):
         pass
 
 
-async def _audit(message, amal, tafsilot):
-    admin = await db.get_user(message.from_user.id)
+async def _audit(message, amal, tafsilot, admin=None):
+    if admin is None:
+        admin = await db.get_user(message.from_user.id)
     await db.add_audit_log(
         message.from_user.id,
         admin["ism"] if admin else str(message.from_user.id),
@@ -135,8 +137,8 @@ async def _profil_text(uid):
 
 
 @router.message(Tkey("👥 Foydalanuvchilar"))
-async def foydalanuvchilar(message: Message):
-    if not await _ruxsat(message):
+async def foydalanuvchilar(message: Message, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     await say(message, "👥 Foydalanuvchilar boshqaruvi:",
               reply_markup=await users_menu(message.from_user.id))
@@ -182,8 +184,8 @@ async def _uview_panel(uid, viewer_id):
 
 
 @router.message(Tkey("👤 Foydalanuvchilar"))
-async def foydalanuvchilar_royxati(message: Message):
-    if not await _ruxsat(message):
+async def foydalanuvchilar_royxati(message: Message, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     users = await db.get_all_users()
     if not users:
@@ -225,8 +227,8 @@ async def uview_list_cb(callback: CallbackQuery):
 
 # ── Qo'lda qo'shish (Telegram ID kerak — tashqi foydalanuvchi) ──
 @router.message(Tkey("➕ Foydalanuvchi qo'shish"))
-async def user_qoshish(message: Message, state: FSMContext):
-    if not await _ruxsat(message):
+async def user_qoshish(message: Message, state: FSMContext, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     await state.clear()
     await state.set_state(UserAddState.user_id)
@@ -260,7 +262,7 @@ async def rol_menu(user_id):
 
 
 @router.message(UserAddState.rol)
-async def user_rol_kiritish(message: Message, state: FSMContext):
+async def user_rol_kiritish(message: Message, state: FSMContext, user: dict = None):
     uz = await canon(message, list(ROL_MAP.keys()))
     if not uz:
         await say(message, "❌ Tugmalardan birini tanlang!")
@@ -271,7 +273,7 @@ async def user_rol_kiritish(message: Message, state: FSMContext):
         await db.add_user(data["user_id"], data["ism"], None, rol)
         await db.remove_pending(data["user_id"])
         await _audit(message, "Foydalanuvchi qo'shildi",
-                     f"{data['ism']} (ID: {data['user_id']}) → {rol}")
+                     f"{data['ism']} (ID: {data['user_id']}) → {rol}", admin=user)
         await state.clear()
         await _xabar_ber(message.bot, data["user_id"],
                          "✅ Siz tizimga qo'shildingiz! /start bosing.")
@@ -286,8 +288,8 @@ async def user_rol_kiritish(message: Message, state: FSMContext):
 
 # ── Kutilayotgan so'rovlar + onboarding ──
 @router.message(Tkey("📋 Kutilayotgan so'rovlar"))
-async def kutilayotgan(message: Message):
-    if not await _ruxsat(message):
+async def kutilayotgan(message: Message, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     pending = await db.get_pending()
     if not pending:
@@ -512,14 +514,14 @@ async def usrsuperok_cb(callback: CallbackQuery):
 
 
 @router.message(UserNameState.ism)
-async def ism_ozgartirish_saqlash(message: Message, state: FSMContext):
+async def ism_ozgartirish_saqlash(message: Message, state: FSMContext, user: dict = None):
     yangi = message.text.strip()
     data = await state.get_data()
     if "user_id" not in data:
         await state.clear()
         return
     await db.update_user_ism(data["user_id"], yangi)
-    await _audit(message, "Ism o'zgartirildi", f"{data.get('eski', '')} → {yangi}")
+    await _audit(message, "Ism o'zgartirildi", f"{data.get('eski', '')} → {yangi}", admin=user)
     await state.clear()
     await say(message, f"✅ Ism yangilandi: {yangi}",
               reply_markup=await users_menu(message.from_user.id))
@@ -527,8 +529,8 @@ async def ism_ozgartirish_saqlash(message: Message, state: FSMContext):
 
 # ── Qidirish ──
 @router.message(Tkey("🔎 Qidirish"))
-async def qidirish(message: Message, state: FSMContext):
-    if not await _ruxsat(message):
+async def qidirish(message: Message, state: FSMContext, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     await state.clear()
     await state.set_state(UserSearchState.q)
@@ -559,8 +561,8 @@ async def qidirish_natija(message: Message, state: FSMContext):
 
 # ── Audit log ──
 @router.message(Tkey("📋 Audit log"))
-async def audit_log(message: Message):
-    if not await _ruxsat(message):
+async def audit_log(message: Message, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     try:
         logs = await db.get_audit_log(30)

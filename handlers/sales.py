@@ -1,11 +1,11 @@
 from aiogram import Router
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import asyncio
 import database as db
 from translation import (
-    Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil,
+    Tkey, eq, say, say_error, build_keyboard, build_mixed_keyboard,
 )
 
 router = Router()
@@ -28,18 +28,16 @@ async def sales_menu(user_id):
 
 
 async def _kb(user_id, dinamik_rows, static_rows):
-    til = await foydalanuvchi_tili(user_id)
-    kb = []
-    for row in dinamik_rows:
-        kb.append([KeyboardButton(text=s) for s in row])
-    for row in static_rows:
-        kb.append([KeyboardButton(text=(s if til == "uz" else await tarjima_qil(s, til)))
-                   for s in row])
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+    return await build_mixed_keyboard(user_id, dinamik_rows, static_rows)
 
 
 def _label(p):
     return f"{p['emoji']} {p['nomi']}"
+
+
+def _block_label(b):
+    """Sotuv blok tugmasi yorlig'i — qoldiq bilan (UX: tanlashdan oldin ko'rinadi)."""
+    return f"{b['nomi']} ({b['qoldiq']} ta)"
 
 
 async def _mahsulot_keyboard(user_id):
@@ -49,7 +47,7 @@ async def _mahsulot_keyboard(user_id):
 
 
 async def _block_keyboard(user_id, bloklar):
-    rows = [[b["nomi"]] for b in bloklar]
+    rows = [[_block_label(b)] for b in bloklar]
     return await _kb(user_id, rows, [["🏠 Asosiy menyu"]])
 
 
@@ -114,7 +112,7 @@ async def sotuv_block(message: Message, state: FSMContext):
     data = await state.get_data()
     bloklar = data.get("bloklar", [])
     text = (message.text or "").strip()
-    tanlangan = next((b for b in bloklar if b["nomi"] == text), None)
+    tanlangan = next((b for b in bloklar if _block_label(b) == text), None)
     if not tanlangan:
         await say(message, "❌ Tugmalardan birini tanlang!")
         return
@@ -126,7 +124,7 @@ async def sotuv_block(message: Message, state: FSMContext):
 
 
 @router.message(SalesState.miqdor)
-async def sotuv_miqdor(message: Message, state: FSMContext):
+async def sotuv_miqdor(message: Message, state: FSMContext, user: dict = None):
     user_id = message.from_user.id
     try:
         miqdor = int(message.text.strip())
@@ -147,7 +145,8 @@ async def sotuv_miqdor(message: Message, state: FSMContext):
         await say(message, xabar, reply_markup=await sales_menu(user_id))
         return
 
-    user = await db.get_user(user_id)
+    if user is None:
+        user = await db.get_user(user_id)
     await db.add_audit_log(
         user_id, user["ism"] if user else str(user_id),
         user["rol"] if user else "-", "Sotuv kiritildi",

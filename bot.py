@@ -40,11 +40,28 @@ dp = Dispatcher()
 BOT_VERSION = "2.1.1"
 
 # ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
+# Xotira keshi DB bilan birga ishlaydi: unlock vaqti DB ga saqlanadi (restartga chidamli),
+# har xabarda DB o'qilmasligi uchun xotira keshi birlamchi, DB yozuv throttle qilinadi.
 _pin_holat = {}
-# PIN inline-keypad holati (xotirada): {user_id: kiritilayotgan_raqamlar}
+# PIN inline-keypad holati (xotirada, transient): {user_id: kiritilayotgan_raqamlar}
 _pin_kiritish = {}
 # Har bir foydalanuvchining joriy keypad xabari id: {user_id: message_id}
 _pin_msg = {}
+# DB yozuvini throttle qilish uchun: {user_id: oxirgi_db_yozuv_epoch}
+_pin_db_ts = {}
+_PIN_DB_THROTTLE = 60.0
+
+
+async def _pin_remember(uid, now):
+    """Faollik vaqtini xotiraga yozadi, DB ga esa throttle bilan (har ~60s)."""
+    _pin_holat[uid] = now
+    last = _pin_db_ts.get(uid)
+    if last is None or now - last >= _PIN_DB_THROTTLE:
+        _pin_db_ts[uid] = now
+        try:
+            await db.set_pin_active(uid, now)
+        except Exception:
+            pass
 
 
 def pin_hash(pin: str) -> str:
@@ -110,7 +127,13 @@ async def pin_keypad_cb(callback: CallbackQuery):
         entered = entered[:-1]
     elif data == "pin_ok":
         if pin_hash(entered) == saqlangan:
-            _pin_holat[uid] = time.time()
+            now = time.time()
+            _pin_holat[uid] = now
+            _pin_db_ts[uid] = now
+            try:
+                await db.set_pin_active(uid, now)
+            except Exception:
+                pass
             _pin_kiritish.pop(uid, None)
             _pin_msg.pop(uid, None)
             try:
@@ -162,6 +185,7 @@ async def get_menu(user_id, rol):
         return await build_keyboard(user_id, [
             ["🏭 Ishlab chiqarish"],
             ["💰 Sotuv"],
+            ["📊 Joriy holat"],
             ["🏪 Ombor"],
             ["🏬 Tayyor mahsulot"],
             ["📊 Hisobot"],
@@ -182,6 +206,8 @@ async def get_menu(user_id, rol):
         tugmalar.add("🏪 Ombor")
     if perms.get("tayyor_mahsulot_korish") or perms.get("tayyor_mahsulot_tahrirlash"):
         tugmalar.add("🏬 Tayyor mahsulot")
+    if perms.get("ombor_korish") or perms.get("tayyor_mahsulot_korish"):
+        tugmalar.add("📊 Joriy holat")
     if perms.get("hisobot_korish") or perms.get("moliya_korish") or perms.get("excel_hisobot"):
         tugmalar.add("📊 Hisobot")
     if perms.get("inventarizatsiya"):
@@ -212,6 +238,9 @@ class PermissionMiddleware(BaseMiddleware):
         "✏️ Dastlabki qoldiqni kiritish": "tayyor_mahsulot_tahrirlash",
         "📊 Umumiy hisobot": "hisobot_korish",
         "📊 Tafsilotli hisobot": "hisobot_korish",
+        "📊 Hisobot ko'rish": "hisobot_korish",
+        "📁 Fayl yuklash": "excel_hisobot",
+        "⬅️ Hisobot": "hisobot_korish",
         "👷 Ishchilar hisoboti": "moliya_korish",
         "🧱 Material sarfi": "hisobot_korish",
         "💰 Moliya hisoboti": "moliya_korish",
@@ -276,7 +305,13 @@ class PermissionMiddleware(BaseMiddleware):
         if saqlangan_hash:
             timeout = int(await db.get_bot_setting("pin_timeout") or 5) * 60
             hozir = time.time()
-            oxirgi = _pin_holat.get(event.from_user.id)
+            uid = event.from_user.id
+            oxirgi = _pin_holat.get(uid)
+            if oxirgi is None:
+                # Restartdan keyin xotira bo'sh — DB dan tiklaymiz (bir marta)
+                oxirgi = await db.get_pin_active(uid)
+                if oxirgi is not None:
+                    _pin_holat[uid] = oxirgi
             qulflangan = (oxirgi is None) or (hozir - oxirgi > timeout)
             if qulflangan:
                 # Xavfsizlik: foydalanuvchi yozgan matnni o'chiramiz
@@ -285,10 +320,10 @@ class PermissionMiddleware(BaseMiddleware):
                     await event.delete()
                 except Exception:
                     pass
-                await _pin_keypad_yubor(event.chat.id, event.from_user.id)
+                await _pin_keypad_yubor(event.chat.id, uid)
                 return
-            # Faol — vaqtni yangilaymiz
-            _pin_holat[event.from_user.id] = hozir
+            # Faol — vaqtni yangilaymiz (DB yozuvi throttled)
+            await _pin_remember(uid, hozir)
 
         # Oxirgi faollik vaqtini yangilaymiz
         await db.touch_user(event.from_user.id)
@@ -468,6 +503,60 @@ async def asosiy(message: Message):
         menu = await get_menu(message.from_user.id, user["rol"])
         xabar = await t("🏠 Asosiy menyu:", message.from_user.id)
         await message.answer(xabar, reply_markup=menu)
+
+
+# ── Joriy holat (tezkor xulosa: xom ashyo + tayyor mahsulot) ──
+@dp.message(Tkey("📊 Joriy holat"))
+async def joriy_holat(message: Message):
+    user = await db.get_user(message.from_user.id)
+    if not user or not user["faol"]:
+        return
+    uid = message.from_user.id
+    is_super = user["rol"] == "superadmin"
+    perms = await db.get_user_permissions(uid, user["rol"])
+    show_ombor = is_super or perms.get("ombor_korish")
+    show_tayyor = is_super or perms.get("tayyor_mahsulot_korish")
+
+    text = "📊 Joriy holat\n━━━━━━━━━━━━━━━━\n"
+
+    if show_ombor:
+        materials = await db.get_materials()
+        settings_rows = await db.get_settings()
+        min_map = {s[3]: s[1] for s in settings_rows}
+        text += "\n🏪 Xom ashyo:\n"
+        ogohlar = []
+        if materials:
+            for m in materials:
+                mid, nomi, qoldiq_asosiy, _, asl = m[0], m[1], m[2], m[3], m[4]
+                qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl)
+                min_ch = min_map.get(mid)
+                past = bool(min_ch and qoldiq_asosiy <= min_ch)
+                belgi = "⚠️" if past else "✅"
+                text += f"  {belgi} {nomi}: {qoldiq_asl:.2f} {asl}\n"
+                if past:
+                    ogohlar.append(nomi)
+        else:
+            text += "  (yo'q)\n"
+        if ogohlar:
+            text += f"  ❗ Past qoldiq: {', '.join(ogohlar)}\n"
+
+    if show_tayyor:
+        text += "\n🏬 Tayyor mahsulot:\n"
+        goods = await db.get_all_finished_goods()
+        if goods:
+            joriy = None
+            jami = 0
+            for g in goods:
+                if g["product_id"] != joriy:
+                    joriy = g["product_id"]
+                    text += f"  {g['emoji']} {g['product_nomi']}:\n"
+                text += f"     {g['nomi']}: {g['qoldiq']} ta\n"
+                jami += g["qoldiq"]
+            text += f"  📦 Jami: {jami} ta\n"
+        else:
+            text += "  (yo'q)\n"
+
+    await message.answer(await t(text, uid))
 
 
 # ── /til — har bir foydalanuvchi o'z tilini o'zgartirishi mumkin ──

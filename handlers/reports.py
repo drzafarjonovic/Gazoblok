@@ -18,6 +18,7 @@ from translation import (
     Tkey, say, build_keyboard, t, log_exc, GENERIC_ERROR,
     foydalanuvchi_tili, tarjima_qil, register_ui,
 )
+from .callbacks import CB
 
 # GMT+5 timezone
 TOSHKENT_TZ = timezone(timedelta(hours=5))
@@ -45,18 +46,31 @@ class CustomRange(StatesGroup):
 
 
 async def reports_menu(user_id):
+    """1-bosqich: kam tugmali asosiy hisobot menyusi."""
     return await build_keyboard(user_id, [
-        ["📊 Umumiy hisobot"],
-        ["📊 Tafsilotli hisobot"],
-        ["👷 Ishchilar hisoboti"],
-        ["🧱 Material sarfi"],
-        ["💰 Moliya hisoboti"],
-        ["📈 Taqqoslash"],
+        ["📊 Hisobot ko'rish"],
+        ["📁 Fayl yuklash"],
         ["📉 Grafiklar"],
-        ["📥 Excel hisobot"],
-        ["📄 CSV eksport"],
-        ["📄 PDF eksport"],
         ["🏠 Asosiy menyu"],
+    ])
+
+
+async def korish_menu(user_id):
+    """2-bosqich: matnli hisobot turlari."""
+    return await build_keyboard(user_id, [
+        ["📊 Umumiy hisobot", "📊 Tafsilotli hisobot"],
+        ["💰 Moliya hisoboti", "👷 Ishchilar hisoboti"],
+        ["🧱 Material sarfi", "📈 Taqqoslash"],
+        ["⬅️ Hisobot"],
+    ])
+
+
+async def fayl_menu(user_id):
+    """2-bosqich: eksport formatlari."""
+    return await build_keyboard(user_id, [
+        ["📥 Excel hisobot"],
+        ["📄 CSV eksport", "📄 PDF eksport"],
+        ["⬅️ Hisobot"],
     ])
 
 
@@ -104,7 +118,7 @@ async def davr_keyboard(user_id, rtype, pid_str):
     for kod, label in DAVRLAR:
         matn = label if til == "uz" else await tarjima_qil(label, til)
         row.append(InlineKeyboardButton(
-            text=matn, callback_data=f"rep:{rtype}:{pid_str}:{kod}"))
+            text=matn, callback_data=f"{CB.REP}:{rtype}:{pid_str}:{kod}"))
         if len(row) == 2:
             kb.append(row)
             row = []
@@ -116,10 +130,10 @@ async def davr_keyboard(user_id, rtype, pid_str):
 async def product_filter_keyboard(user_id, rtype):
     til = await foydalanuvchi_tili(user_id)
     hammasi = "Hammasi" if til == "uz" else await tarjima_qil("Hammasi", til)
-    kb = [[InlineKeyboardButton(text=f"🌐 {hammasi}", callback_data=f"repp:{rtype}:all")]]
+    kb = [[InlineKeyboardButton(text=f"🌐 {hammasi}", callback_data=f"{CB.REP_PROD}:{rtype}:all")]]
     for p in await db.get_mahsulotlar(faqat_faol=False):
         kb.append([InlineKeyboardButton(
-            text=f"{p['emoji']} {p['nomi']}", callback_data=f"repp:{rtype}:{p['id']}")])
+            text=f"{p['emoji']} {p['nomi']}", callback_data=f"{CB.REP_PROD}:{rtype}:{p['id']}")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -625,6 +639,23 @@ async def hisobot(message: Message):
     await say(message, "📊 Hisobotlar:", reply_markup=await reports_menu(message.from_user.id))
 
 
+@router.message(Tkey("⬅️ Hisobot"))
+async def hisobot_orqaga(message: Message):
+    await say(message, "📊 Hisobotlar:", reply_markup=await reports_menu(message.from_user.id))
+
+
+@router.message(Tkey("📊 Hisobot ko'rish"))
+async def hisobot_korish_menu(message: Message):
+    await say(message, "📊 Hisobot turini tanlang:",
+              reply_markup=await korish_menu(message.from_user.id))
+
+
+@router.message(Tkey("📁 Fayl yuklash"))
+async def fayl_yuklash_menu(message: Message):
+    await say(message, "📁 Yuklab olish formatini tanlang:",
+              reply_markup=await fayl_menu(message.from_user.id))
+
+
 async def _davr_sorov(message, rtype):
     user_id = message.from_user.id
     prods = await db.get_mahsulotlar(faqat_faol=False)
@@ -687,7 +718,7 @@ async def pdf_entry(message: Message):
 
 
 # ── Mahsulot tanlash callback ──
-@router.callback_query(lambda c: c.data and c.data.startswith("repp:"))
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.REP_PROD}:"))
 async def repp_callback(callback: CallbackQuery):
     parts = callback.data.split(":")
     rtype = parts[1] if len(parts) > 1 else "umumiy"
@@ -702,7 +733,7 @@ async def repp_callback(callback: CallbackQuery):
 
 
 # ── Davr callback ──
-@router.callback_query(lambda c: c.data and c.data.startswith("rep:"))
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.REP}:"))
 async def rep_callback(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
     rtype = parts[1] if len(parts) > 1 else "umumiy"

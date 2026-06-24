@@ -1,11 +1,11 @@
 from aiogram import Router
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import asyncio
 import database as db
 from translation import (
-    Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil,
+    Tkey, eq, say, say_error, build_keyboard, build_mixed_keyboard,
 )
 
 router = Router()
@@ -28,15 +28,8 @@ async def production_menu(user_id):
 
 
 async def _kb(user_id, dinamik_rows, static_rows):
-    """Dinamik (xom, tarjimasiz) + statik (tarjima qilingan) tugmalar."""
-    til = await foydalanuvchi_tili(user_id)
-    kb = []
-    for row in dinamik_rows:
-        kb.append([KeyboardButton(text=s) for s in row])
-    for row in static_rows:
-        kb.append([KeyboardButton(text=(s if til == "uz" else await tarjima_qil(s, til)))
-                   for s in row])
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+    """Dinamik + statik tugmalar (markazlashgan helper'ga ko'prik)."""
+    return await build_mixed_keyboard(user_id, dinamik_rows, static_rows)
 
 
 async def _mahsulot_keyboard(user_id, static_rows):
@@ -221,7 +214,8 @@ async def shablon_tanlash(message: Message, state: FSMContext):
     ch = ", ".join(f"{c['soni']}×{c['block_kod']}" for c in tanlangan["chiqim"])
     await say(message,
               f"📦 {tanlangan['nomi']} (1 qolip: {ch})\n\n"
-              f"Nechta qolip? (Hozir: {joriy} ta)\nMisol: 5")
+              f"Nechta qolip? (Hozir: {joriy} ta)\nMisol: 5\n"
+              f"💡 0 = bu shablonni ro'yxatdan olib tashlash")
 
 
 @router.message(ProductionState.miqdor_kiritish)

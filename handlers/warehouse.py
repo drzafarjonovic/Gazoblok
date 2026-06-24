@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
 from translation import Tkey, say, say_error, build_keyboard, t, register_ui, log_exc
+from .callbacks import CB
 
 router = Router()
 
@@ -38,7 +39,7 @@ async def _ombor_kiritish_ok(user_id):
 
 def _bekor_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="wh_cancel")]
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=CB.WH_CANCEL)]
     ])
 
 
@@ -50,8 +51,8 @@ async def _material_kb(user_id):
         qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
         kb.append([InlineKeyboardButton(
             text=f"{m[1]} — {qoldiq_asl:.0f} {m[4]}",
-            callback_data=f"wh_mat:{m[0]}")])
-    kb.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data="wh_cancel")])
+            callback_data=f"{CB.WH_MAT}:{m[0]}")])
+    kb.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data=CB.WH_CANCEL)])
     return InlineKeyboardMarkup(inline_keyboard=kb), materials
 
 
@@ -61,13 +62,13 @@ def _birlik_kb(asl_birlik):
     birliklar = OGIRLIK_BIRLIK if baza == "kg" else HAJM_BIRLIK
     kb, row = [], []
     for b in birliklar:
-        row.append(InlineKeyboardButton(text=b, callback_data=f"wh_unit:{b}"))
+        row.append(InlineKeyboardButton(text=b, callback_data=f"{CB.WH_UNIT}:{b}"))
         if len(row) == 2:
             kb.append(row)
             row = []
     if row:
         kb.append(row)
-    kb.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data="wh_cancel")])
+    kb.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data=CB.WH_CANCEL)])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -116,7 +117,7 @@ async def xom_ashyo_kirim(message: Message, state: FSMContext):
     await say(message, "📥 Qaysi material keldi?\nTugmadan tanlang:", reply_markup=kb)
 
 
-@router.callback_query(lambda c: c.data == "wh_cancel")
+@router.callback_query(lambda c: c.data == CB.WH_CANCEL)
 async def wh_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     try:
@@ -129,7 +130,7 @@ async def wh_cancel(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("wh_mat:"))
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.WH_MAT}:"))
 async def wh_mat(callback: CallbackQuery, state: FSMContext):
     if not await _ombor_kiritish_ok(callback.from_user.id):
         await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
@@ -169,7 +170,7 @@ async def kirim_miqdor(message: Message, state: FSMContext):
     await message.answer(matn, reply_markup=_birlik_kb(data["asl_birlik"]))
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("wh_unit:"))
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.WH_UNIT}:"))
 async def wh_unit(callback: CallbackQuery, state: FSMContext):
     if not await _ombor_kiritish_ok(callback.from_user.id):
         await callback.answer("❌ Ruxsat yo'q!", show_alert=True)

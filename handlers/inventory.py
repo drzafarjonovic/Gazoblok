@@ -1,11 +1,11 @@
 from aiogram import Router
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import timezone, timedelta
 import database as db
 from translation import (
-    Tkey, eq, say, say_error, build_keyboard, foydalanuvchi_tili, tarjima_qil,
+    Tkey, eq, say, say_error, build_keyboard, build_mixed_keyboard,
 )
 
 router = Router()
@@ -30,14 +30,7 @@ async def inventory_menu(user_id):
 
 
 async def _kb(user_id, dinamik_rows, static_rows):
-    til = await foydalanuvchi_tili(user_id)
-    kb = []
-    for row in dinamik_rows:
-        kb.append([KeyboardButton(text=s) for s in row])
-    for row in static_rows:
-        kb.append([KeyboardButton(text=(s if til == "uz" else await tarjima_qil(s, til)))
-                   for s in row])
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+    return await build_mixed_keyboard(user_id, dinamik_rows, static_rows)
 
 
 def _label(p):
@@ -144,7 +137,7 @@ async def inv_real_hisob(message: Message, state: FSMContext):
 
 
 @router.message(InventarizatsiyaState.izoh)
-async def inv_izoh(message: Message, state: FSMContext):
+async def inv_izoh(message: Message, state: FSMContext, user: dict = None):
     user_id = message.from_user.id
     try:
         izoh = message.text.strip()
@@ -160,7 +153,8 @@ async def inv_izoh(message: Message, state: FSMContext):
         farq = await db.add_inventarizatsiya(
             pid, db.bugungi_sana(), block_kod, bot_hisob, real_hisob, izoh, user_id)
 
-        user = await db.get_user(user_id)
+        if user is None:
+            user = await db.get_user(user_id)
         await db.add_audit_log(
             user_id, user["ism"] if user else str(user_id),
             user["rol"] if user else "-", "Inventarizatsiya kiritildi",

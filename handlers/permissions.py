@@ -70,8 +70,9 @@ async def rol_menu(user_id):
     ])
 
 
-async def _ruxsat(message: Message) -> bool:
-    user = await db.get_user(message.from_user.id)
+async def _ruxsat(message: Message, user=None) -> bool:
+    if user is None:
+        user = await db.get_user(message.from_user.id)
     if not user or not user["faol"]:
         await say(message, "❌ Ruxsat yo'q!")
         return False
@@ -121,8 +122,8 @@ async def user_perm_keyboard(is_super, uid):
 
 # ── Kirish ──
 @router.message(Tkey("🔐 Huquqlar boshqaruvi"))
-async def huquqlar(message: Message):
-    if not await _ruxsat(message):
+async def huquqlar(message: Message, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     await say(message, "🔐 Huquqlar boshqaruvi:",
               reply_markup=await permissions_menu(message.from_user.id))
@@ -130,8 +131,8 @@ async def huquqlar(message: Message):
 
 # ── Rol huquqlari ──
 @router.message(Tkey("🔐 Rol huquqlari"))
-async def rol_huquqlari(message: Message, state: FSMContext):
-    if not await _ruxsat(message):
+async def rol_huquqlari(message: Message, state: FSMContext, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     await state.clear()
     await state.set_state(RolPermState.rol)
@@ -140,14 +141,15 @@ async def rol_huquqlari(message: Message, state: FSMContext):
 
 
 @router.message(RolPermState.rol)
-async def rol_tanlash(message: Message, state: FSMContext):
+async def rol_tanlash(message: Message, state: FSMContext, user: dict = None):
     uz = await canon(message, list(ROL_MAP.keys()))
     if not uz:
         await say(message, "❌ Tugmalardan birini tanlang!")
         return
     rol = ROL_MAP[uz]
     await state.clear()
-    user = await db.get_user(message.from_user.id)
+    if user is None:
+        user = await db.get_user(message.from_user.id)
     is_super = bool(user and user["rol"] == "superadmin")
     kb = await rol_perm_keyboard(is_super, rol)
     await say(
@@ -160,8 +162,8 @@ async def rol_tanlash(message: Message, state: FSMContext):
 
 # ── Foydalanuvchi individual huquqlari ──
 @router.message(Tkey("👤 Foydalanuvchi huquqlari"))
-async def user_huquqlari(message: Message, state: FSMContext):
-    if not await _ruxsat(message):
+async def user_huquqlari(message: Message, state: FSMContext, user: dict = None):
+    if not await _ruxsat(message, user):
         return
     await state.clear()
     users = await db.get_all_users()
