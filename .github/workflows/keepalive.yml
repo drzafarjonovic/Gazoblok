@@ -1,0 +1,65 @@
+name: Supabase Keep-Alive
+
+# Supabase bepul tarifi 7 kun nofaollikdan keyin loyihani pauza qiladi.
+# Bu workflow har 6 soatda DB ga yengil "SELECT 1" so'rovini yuborib,
+# uni faol holatda ushlab turadi.
+#
+# SOZLASH (bir martalik):
+#   GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret
+#   Nomi:  DATABASE_URL
+#   Qiymat: bot ishlatadigan Supabase ulanish satri (.env dagi DATABASE_URL bilan bir xil)
+#
+# Eslatma: 12 soatlik interval xohlasangiz, pastdagi cron'ni "0 */12 * * *" ga o'zgartiring.
+# Eslatma: GitHub repo'da 60 kun davomida hech qanday faollik bo'lmasa, rejalashtirilgan
+#          workflow'lar avtomatik o'chiriladi (commit qilib tursangiz muammo bo'lmaydi).
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # har 6 soatda (UTC)
+  workflow_dispatch: {}       # qo'lda ishga tushirish (test uchun)
+
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install asyncpg
+        run: pip install --quiet "asyncpg==0.29.0"
+
+      - name: Ping Supabase
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          import sys
+          import asyncpg
+
+          async def main():
+              url = os.environ.get("DATABASE_URL")
+              if not url:
+                  print("XATO: DATABASE_URL secret o'rnatilmagan!")
+                  sys.exit(1)
+              # Bot bilan bir xil usul: pooler (pgbouncer) uchun statement_cache_size=0
+              conn = await asyncpg.connect(url, statement_cache_size=0, timeout=30)
+              try:
+                  val = await conn.fetchval("SELECT 1;")
+                  print("Supabase keep-alive OK ->", val)
+              finally:
+                  await conn.close()
+
+          asyncio.run(main())
+          PY
