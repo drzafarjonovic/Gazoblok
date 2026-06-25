@@ -37,7 +37,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # Bot versiyasi
-BOT_VERSION = "2.1.1"
+BOT_VERSION = "2.2.0"
 
 # ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
 # Xotira keshi DB bilan birga ishlaydi: unlock vaqti DB ga saqlanadi (restartga chidamli),
@@ -224,34 +224,12 @@ async def get_menu(user_id, rol):
 
 # ── Middleware ──
 class PermissionMiddleware(BaseMiddleware):
-    # Tugma (kanonik o'zbekcha) → kerakli permission
+    # Tugma (kanonik o'zbekcha) → kerakli permission.
+    # DIQQAT: operatsion bo'lim ichidagi amallar (ishlab chiqarish/sotuv/ombor/
+    # tayyor mahsulot/inventarizatsiya) v2.2 dan inline callback'lar — ularning
+    # ruxsati handlers/nav.cb_guard orqali tekshiriladi, shuning uchun bu yerda yo'q.
+    # Bu yerda faqat hali Reply bo'lib qolgan tugmalar.
     TUGMA_PERMISSION = {
-        "🏭 Ishlab chiqarishni kiritish": "ishlab_chiqarish_kiritish",
-        "📋 Bugungi ishlab chiqarish": "ishlab_chiqarish_korish",
-        "🗑️ Oxirgi yozuvni o'chirish": "ishlab_chiqarish_kiritish",
-        "💰 Sotuv kiritish": "sotuv_kiritish",
-        "📋 Bugungi sotuv": "sotuv_korish",
-        "🗑️ Oxirgi sotuvni o'chirish": "sotuv_kiritish",
-        "📥 Xom ashyo kirim": "ombor_kiritish",
-        "🏪 Joriy qoldiqlar": "ombor_korish",
-        "📦 Tayyor mahsulot qoldig'i": "tayyor_mahsulot_korish",
-        "✏️ Dastlabki qoldiqni kiritish": "tayyor_mahsulot_tahrirlash",
-        "📊 Umumiy hisobot": "hisobot_korish",
-        "📊 Tafsilotli hisobot": "hisobot_korish",
-        "📊 Hisobot ko'rish": "hisobot_korish",
-        "📁 Fayl yuklash": "excel_hisobot",
-        "⬅️ Hisobot": "hisobot_korish",
-        "👷 Ishchilar hisoboti": "moliya_korish",
-        "🧱 Material sarfi": "hisobot_korish",
-        "💰 Moliya hisoboti": "moliya_korish",
-        "📈 Taqqoslash": "hisobot_korish",
-        "📉 Grafiklar": "hisobot_korish",
-        "📥 Excel hisobot": "excel_hisobot",
-        "📄 CSV eksport": "excel_hisobot",
-        "📄 PDF eksport": "excel_hisobot",
-        "📋 Inventarizatsiya": "inventarizatsiya",
-        "📊 Inventarizatsiya kiritish": "inventarizatsiya",
-        "📋 Inventarizatsiya tarixi": "inventarizatsiya",
         "⚙️ Sozlamalar": "sozlama_boshqaruv",
         "👥 Foydalanuvchilar": "foydalanuvchi_boshqaruv",
         "🔐 Huquqlar boshqaruvi": "foydalanuvchi_boshqaruv",

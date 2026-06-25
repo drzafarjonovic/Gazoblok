@@ -1,148 +1,151 @@
+"""Tayyor mahsulot — inline edit-in-place oqim (v2.2)."""
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import (
-    Tkey, eq, say, say_error, build_keyboard, build_mixed_keyboard,
-)
+from translation import Tkey, say, t
+from .nav import cb_guard, menu_kb, show, send
+from .callbacks import CB
 
 router = Router()
 
+P_KORISH = "tayyor_mahsulot_korish"
+P_EDIT = "tayyor_mahsulot_tahrirlash"
+
 
 class FinishedGoodsState(StatesGroup):
-    mahsulot_tanlash = State()
-    block_tanlash = State()
     miqdor = State()
-
-
-async def finished_menu(user_id):
-    return await build_keyboard(user_id, [
-        ["📦 Tayyor mahsulot qoldig'i"],
-        ["✏️ Dastlabki qoldiqni kiritish"],
-        ["🏠 Asosiy menyu"],
-    ])
-
-
-async def _kb(user_id, dinamik_rows, static_rows):
-    return await build_mixed_keyboard(user_id, dinamik_rows, static_rows)
 
 
 def _label(p):
     return f"{p['emoji']} {p['nomi']}"
 
 
-async def _mahsulot_keyboard(user_id):
-    prods = await db.get_mahsulotlar(faqat_faol=True)
-    rows = [[_label(p)] for p in prods]
-    return await _kb(user_id, rows, [["🏠 Asosiy menyu"]]), prods
+async def _root_kb(user_id):
+    return await menu_kb(user_id, [
+        [("📦 Tayyor mahsulot qoldig'i", CB.FG_QOLDIQ)],
+        [("✏️ Dastlabki qoldiqni kiritish", CB.FG_EDIT)],
+    ])
 
 
 @router.message(Tkey("🏬 Tayyor mahsulot"))
-async def tayyor_mahsulot(message: Message):
-    await say(message, "🏬 Tayyor mahsulot ombori:",
-              reply_markup=await finished_menu(message.from_user.id))
+async def tayyor_mahsulot(message: Message, state: FSMContext):
+    await state.clear()
+    await send(message, "🏬 Tayyor mahsulot ombori:", await _root_kb(message.from_user.id))
 
 
-@router.message(Tkey("📦 Tayyor mahsulot qoldig'i"))
-async def tayyor_qoldiq(message: Message):
-    try:
-        goods = await db.get_all_finished_goods()
-        if not goods:
-            await say(message, "❌ Hali mahsulot/blok kiritilmagan!",
-                      reply_markup=await finished_menu(message.from_user.id))
-            return
-        text = "📦 Tayyor mahsulot ombori:\n"
-        jami = 0
-        joriy_pid = None
-        for g in goods:
-            if g["product_id"] != joriy_pid:
-                joriy_pid = g["product_id"]
-                text += f"\n{g['emoji']} {g['product_nomi']}\n"
-            text += f"   🧱 {g['nomi']}: {g['qoldiq']} ta\n"
-            jami += g["qoldiq"]
-        text += f"\n📊 Umumiy jami: {jami} ta"
-        await say(message, text, reply_markup=await finished_menu(message.from_user.id))
-    except Exception as e:
-        await say_error(message, e, reply_markup=await finished_menu(message.from_user.id))
-
-
-@router.message(Tkey("✏️ Dastlabki qoldiqni kiritish"))
-async def dastlabki_qoldiq(message: Message, state: FSMContext, user: dict = None):
-    user_id = message.from_user.id
-    if user is None:
-        user = await db.get_user(user_id)
-    if not user or not await db.has_permission(
-            user_id, user["rol"], "tayyor_mahsulot_tahrirlash"):
-        await say(message, "❌ Sizda bu amalni bajarish huquqi yo'q!",
-                  reply_markup=await finished_menu(user_id))
-        return
-    prods = await db.get_mahsulotlar(faqat_faol=True)
-    if not prods:
-        await say(message, "❌ Mahsulot yo'q.", reply_markup=await finished_menu(user_id))
+@router.callback_query(lambda c: c.data == CB.FG_ROOT)
+async def fg_root(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback):
         return
     await state.clear()
+    await show(callback, "🏬 Tayyor mahsulot ombori:", await _root_kb(callback.from_user.id))
+    await callback.answer()
+
+
+# ── Qoldiq ko'rish ──
+@router.callback_query(lambda c: c.data == CB.FG_QOLDIQ)
+async def fg_qoldiq(callback: CallbackQuery):
+    if not await cb_guard(callback, P_KORISH, P_EDIT):
+        return
+    goods = await db.get_all_finished_goods()
+    if not goods:
+        await show(callback, "❌ Hali mahsulot/blok kiritilmagan!",
+                   await _root_kb(callback.from_user.id))
+        await callback.answer()
+        return
+    text = "📦 Tayyor mahsulot ombori:\n"
+    jami = 0
+    joriy = None
+    for g in goods:
+        if g["product_id"] != joriy:
+            joriy = g["product_id"]
+            text += f"\n{g['emoji']} {g['product_nomi']}\n"
+        text += f"   🧱 {g['nomi']}: {g['qoldiq']} ta\n"
+        jami += g["qoldiq"]
+    text += f"\n📊 Umumiy jami: {jami} ta"
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.FG_ROOT)]])
+    await show(callback, text, kb)
+    await callback.answer()
+
+
+# ── Dastlabki qoldiq ──
+@router.callback_query(lambda c: c.data == CB.FG_EDIT)
+async def fg_edit(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_EDIT):
+        return
+    await state.clear()
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    if not prods:
+        await show(callback, "❌ Mahsulot yo'q.", await _root_kb(callback.from_user.id))
+        await callback.answer()
+        return
     if len(prods) == 1:
-        await _block_sorov(message, state, prods[0])
+        await _show_blocks(callback, state, prods[0])
+        await callback.answer()
         return
-    kb, _ = await _mahsulot_keyboard(user_id)
-    await state.set_state(FinishedGoodsState.mahsulot_tanlash)
-    await say(message, "📦 Qaysi mahsulot?", reply_markup=kb)
+    dyn = [[(_label(p), f"{CB.FG_PROD}:{p['id']}")] for p in prods]
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.FG_ROOT)]], dyn)
+    await show(callback, "📦 Qaysi mahsulot?", kb)
+    await callback.answer()
 
 
-async def _block_sorov(message, state, mahsulot):
-    user_id = message.from_user.id
-    bloklar = await db.get_finished_goods(mahsulot["id"])
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.FG_PROD}:"))
+async def fg_prod(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_EDIT):
+        return
+    pid = int(callback.data.split(":", 1)[1])
+    mahsulot = await db.get_mahsulot(pid)
+    if not mahsulot:
+        await callback.answer("❌ Topilmadi", show_alert=True)
+        return
+    await _show_blocks(callback, state, mahsulot)
+    await callback.answer()
+
+
+async def _show_blocks(callback, state, mahsulot):
+    pid = mahsulot["id"]
+    bloklar = await db.get_finished_goods(pid)
     if not bloklar:
-        await state.clear()
-        await say(message, f"❌ '{mahsulot['nomi']}' uchun blok yo'q!",
-                  reply_markup=await finished_menu(user_id))
+        await show(callback, f"❌ '{mahsulot['nomi']}' uchun blok yo'q!",
+                   await _root_kb(callback.from_user.id))
         return
-    await state.update_data(pid=mahsulot["id"], mahsulot_nomi=mahsulot["nomi"], bloklar=bloklar)
-    await state.set_state(FinishedGoodsState.block_tanlash)
+    await state.set_state(None)
+    await state.update_data(pid=pid, mahsulot_nomi=mahsulot["nomi"], bloklar=bloklar)
     text = "Qaysi blok uchun qoldiq kiritasiz?\n\nJoriy qoldiq:\n"
     for b in bloklar:
         text += f"   {b['nomi']}: {b['qoldiq']} ta\n"
-    rows = [[b["nomi"]] for b in bloklar]
-    await say(message, text, reply_markup=await _kb(user_id, rows, [["🏠 Asosiy menyu"]]))
+    dyn = [[(b["nomi"], f"{CB.FG_BLK}:{i}")] for i, b in enumerate(bloklar)]
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.FG_EDIT)]], dyn)
+    await show(callback, text, kb)
 
 
-@router.message(FinishedGoodsState.mahsulot_tanlash)
-async def fg_mahsulot(message: Message, state: FSMContext):
-    if await eq(message, "🏠 Asosiy menyu"):
-        await state.clear()
-        return
-    prods = await db.get_mahsulotlar(faqat_faol=True)
-    text = (message.text or "").strip()
-    tanlangan = next((p for p in prods if _label(p) == text), None)
-    if not tanlangan:
-        await say(message, "❌ Tugmalardan birini tanlang!")
-        return
-    await _block_sorov(message, state, tanlangan)
-
-
-@router.message(FinishedGoodsState.block_tanlash)
-async def fg_block(message: Message, state: FSMContext):
-    if await eq(message, "🏠 Asosiy menyu"):
-        await state.clear()
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.FG_BLK}:"))
+async def fg_blk(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_EDIT):
         return
     data = await state.get_data()
     bloklar = data.get("bloklar", [])
-    text = (message.text or "").strip()
-    tanlangan = next((b for b in bloklar if b["nomi"] == text), None)
-    if not tanlangan:
-        await say(message, "❌ Tugmalardan birini tanlang!")
+    idx = int(callback.data.split(":", 1)[1])
+    if idx < 0 or idx >= len(bloklar):
+        await callback.answer("❌", show_alert=True)
         return
-    await state.update_data(block_kod=tanlangan["kod"], block_nomi=tanlangan["nomi"])
+    b = bloklar[idx]
+    await state.update_data(block_kod=b["kod"], block_nomi=b["nomi"],
+                            nav_chat=callback.message.chat.id,
+                            nav_msg=callback.message.message_id)
     await state.set_state(FinishedGoodsState.miqdor)
-    await say(message,
-              f"🧱 {tanlangan['nomi']} uchun yangi qoldiqni kiriting:\n"
-              f"Hozirgi qoldiq: {tanlangan['qoldiq']} ta\n\nMisol: 500")
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", f"{CB.FG_PROD}:{data['pid']}")]])
+    await show(callback,
+               f"🧱 {b['nomi']} uchun yangi qoldiqni kiriting:\n"
+               f"Hozirgi qoldiq: {b['qoldiq']} ta\n\nMisol: 500", kb)
+    await callback.answer()
 
 
 @router.message(FinishedGoodsState.miqdor)
-async def fg_miqdor(message: Message, state: FSMContext, user: dict = None):
-    user_id = message.from_user.id
+async def fg_miqdor(message: Message, state: FSMContext):
+    uid = message.from_user.id
     try:
         miqdor = int(message.text.strip())
         if miqdor < 0:
@@ -151,6 +154,9 @@ async def fg_miqdor(message: Message, state: FSMContext, user: dict = None):
         await say(message, "❌ Faqat musbat son kiriting! Misol: 500")
         return
     data = await state.get_data()
+    if "pid" not in data:
+        await state.clear()
+        return
     pid = data["pid"]
     block_kod = data["block_kod"]
     block_nomi = data.get("block_nomi", block_kod)
@@ -158,15 +164,23 @@ async def fg_miqdor(message: Message, state: FSMContext, user: dict = None):
     bloklar = await db.get_finished_goods(pid)
     eski = next((b["qoldiq"] for b in bloklar if b["kod"] == block_kod), 0)
     await db.set_finished_goods(pid, block_kod, miqdor)
-
-    if user is None:
-        user = await db.get_user(user_id)
+    user = await db.get_user(uid)
     await db.add_audit_log(
-        user_id, user["ism"] if user else str(user_id),
-        user["rol"] if user else "-", "Tayyor mahsulot qoldig'i yangilandi",
+        uid, user["ism"] if user else str(uid), user["rol"] if user else "-",
+        "Tayyor mahsulot qoldig'i yangilandi",
         f"{data.get('mahsulot_nomi','')} | {block_nomi}: {eski} → {miqdor} ta")
     await state.clear()
-    await say(message,
-              f"✅ {block_nomi} qoldig'i yangilandi!\n\n"
-              f"   Eski: {eski} ta\n   Yangi: {miqdor} ta",
-              reply_markup=await finished_menu(user_id))
+    text = (f"✅ {block_nomi} qoldig'i yangilandi!\n\n"
+            f"   Eski: {eski} ta\n   Yangi: {miqdor} ta")
+    kb = await _root_kb(uid)
+    chat, msg = data.get("nav_chat"), data.get("nav_msg")
+    edited = False
+    if chat and msg:
+        try:
+            await message.bot.edit_message_text(
+                await t(text, uid), chat_id=chat, message_id=msg, reply_markup=kb)
+            edited = True
+        except Exception:
+            edited = False
+    if not edited:
+        await send(message, text, kb)

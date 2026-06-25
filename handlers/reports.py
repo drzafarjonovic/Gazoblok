@@ -15,10 +15,11 @@ import database as db
 import valyuta as val
 import charts
 from translation import (
-    Tkey, say, build_keyboard, t, log_exc, GENERIC_ERROR,
+    Tkey, say, t, log_exc, GENERIC_ERROR,
     foydalanuvchi_tili, tarjima_qil, register_ui,
 )
 from .callbacks import CB
+from .nav import cb_guard, menu_kb, show, send
 
 # GMT+5 timezone
 TOSHKENT_TZ = timezone(timedelta(hours=5))
@@ -45,32 +46,35 @@ class CustomRange(StatesGroup):
     sana = State()
 
 
-async def reports_menu(user_id):
-    """1-bosqich: kam tugmali asosiy hisobot menyusi."""
-    return await build_keyboard(user_id, [
-        ["📊 Hisobot ko'rish"],
-        ["📁 Fayl yuklash"],
-        ["📉 Grafiklar"],
-        ["🏠 Asosiy menyu"],
+async def _root_kb(user_id):
+    """Inline: hisobot bosh menyusi."""
+    return await menu_kb(user_id, [
+        [("📊 Hisobot ko'rish", f"{CB.REP_MENU}:korish")],
+        [("📁 Fayl yuklash", f"{CB.REP_MENU}:fayl")],
+        [("📉 Grafiklar", f"{CB.REP_MENU}:grafik")],
     ])
 
 
-async def korish_menu(user_id):
-    """2-bosqich: matnli hisobot turlari."""
-    return await build_keyboard(user_id, [
-        ["📊 Umumiy hisobot", "📊 Tafsilotli hisobot"],
-        ["💰 Moliya hisoboti", "👷 Ishchilar hisoboti"],
-        ["🧱 Material sarfi", "📈 Taqqoslash"],
-        ["⬅️ Hisobot"],
+async def _korish_kb(user_id):
+    """Inline: matnli hisobot turlari."""
+    return await menu_kb(user_id, [
+        [("📊 Umumiy hisobot", f"{CB.REP_MENU}:umumiy"),
+         ("📊 Tafsilotli hisobot", f"{CB.REP_MENU}:tafsil")],
+        [("💰 Moliya hisoboti", f"{CB.REP_MENU}:moliya"),
+         ("👷 Ishchilar hisoboti", f"{CB.REP_MENU}:ishchi")],
+        [("🧱 Material sarfi", f"{CB.REP_MENU}:material"),
+         ("📈 Taqqoslash", f"{CB.REP_MENU}:taqqos")],
+        [("⬅️ Ortga", f"{CB.REP_MENU}:root")],
     ])
 
 
-async def fayl_menu(user_id):
-    """2-bosqich: eksport formatlari."""
-    return await build_keyboard(user_id, [
-        ["📥 Excel hisobot"],
-        ["📄 CSV eksport", "📄 PDF eksport"],
-        ["⬅️ Hisobot"],
+async def _fayl_kb(user_id):
+    """Inline: eksport formatlari."""
+    return await menu_kb(user_id, [
+        [("📥 Excel hisobot", f"{CB.REP_MENU}:excel")],
+        [("📄 CSV eksport", f"{CB.REP_MENU}:csv"),
+         ("📄 PDF eksport", f"{CB.REP_MENU}:pdf")],
+        [("⬅️ Ortga", f"{CB.REP_MENU}:root")],
     ])
 
 
@@ -124,6 +128,8 @@ async def davr_keyboard(user_id, rtype, pid_str):
             row = []
     if row:
         kb.append(row)
+    orqaga = "⬅️ Ortga" if til == "uz" else await tarjima_qil("⬅️ Ortga", til)
+    kb.append([InlineKeyboardButton(text=orqaga, callback_data=f"{CB.REP_MENU}:root")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -134,6 +140,8 @@ async def product_filter_keyboard(user_id, rtype):
     for p in await db.get_mahsulotlar(faqat_faol=False):
         kb.append([InlineKeyboardButton(
             text=f"{p['emoji']} {p['nomi']}", callback_data=f"{CB.REP_PROD}:{rtype}:{p['id']}")])
+    orqaga = "⬅️ Ortga" if til == "uz" else await tarjima_qil("⬅️ Ortga", til)
+    kb.append([InlineKeyboardButton(text=orqaga, callback_data=f"{CB.REP_MENU}:root")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -636,85 +644,40 @@ async def _ruxsat(user_id, rtype):
 # ── Kirish ──
 @router.message(Tkey("📊 Hisobot"))
 async def hisobot(message: Message):
-    await say(message, "📊 Hisobotlar:", reply_markup=await reports_menu(message.from_user.id))
+    await send(message, "📊 Hisobotlar:", await _root_kb(message.from_user.id))
 
 
-@router.message(Tkey("⬅️ Hisobot"))
-async def hisobot_orqaga(message: Message):
-    await say(message, "📊 Hisobotlar:", reply_markup=await reports_menu(message.from_user.id))
-
-
-@router.message(Tkey("📊 Hisobot ko'rish"))
-async def hisobot_korish_menu(message: Message):
-    await say(message, "📊 Hisobot turini tanlang:",
-              reply_markup=await korish_menu(message.from_user.id))
-
-
-@router.message(Tkey("📁 Fayl yuklash"))
-async def fayl_yuklash_menu(message: Message):
-    await say(message, "📁 Yuklab olish formatini tanlang:",
-              reply_markup=await fayl_menu(message.from_user.id))
-
-
-async def _davr_sorov(message, rtype):
-    user_id = message.from_user.id
+async def _davr_sorov_cb(callback, rtype):
+    uid = callback.from_user.id
     prods = await db.get_mahsulotlar(faqat_faol=False)
     if len(prods) <= 1:
-        await say(message, "📅 Davrni tanlang:",
-                  reply_markup=await davr_keyboard(user_id, rtype, "all"))
+        await show(callback, "📅 Davrni tanlang:", await davr_keyboard(uid, rtype, "all"))
     else:
-        await say(message, "📦 Mahsulotni tanlang:",
-                  reply_markup=await product_filter_keyboard(user_id, rtype))
+        await show(callback, "📦 Mahsulotni tanlang:",
+                   await product_filter_keyboard(uid, rtype))
 
 
-@router.message(Tkey("📊 Umumiy hisobot"))
-async def umumiy_entry(message: Message):
-    await _davr_sorov(message, "umumiy")
-
-
-@router.message(Tkey("📊 Tafsilotli hisobot"))
-async def tafsil_entry(message: Message):
-    await _davr_sorov(message, "tafsil")
-
-
-@router.message(Tkey("👷 Ishchilar hisoboti"))
-async def ishchi_entry(message: Message):
-    await _davr_sorov(message, "ishchi")
-
-
-@router.message(Tkey("💰 Moliya hisoboti"))
-async def moliya_entry(message: Message):
-    await _davr_sorov(message, "moliya")
-
-
-@router.message(Tkey("📈 Taqqoslash"))
-async def taqqos_entry(message: Message):
-    await _davr_sorov(message, "taqqos")
-
-
-@router.message(Tkey("📥 Excel hisobot"))
-async def excel_entry(message: Message):
-    await _davr_sorov(message, "excel")
-
-
-@router.message(Tkey("📉 Grafiklar"))
-async def grafik_entry(message: Message):
-    await _davr_sorov(message, "grafik")
-
-
-@router.message(Tkey("🧱 Material sarfi"))
-async def material_entry(message: Message):
-    await _davr_sorov(message, "material")
-
-
-@router.message(Tkey("📄 CSV eksport"))
-async def csv_entry(message: Message):
-    await _davr_sorov(message, "csv")
-
-
-@router.message(Tkey("📄 PDF eksport"))
-async def pdf_entry(message: Message):
-    await _davr_sorov(message, "pdf")
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.REP_MENU}:"))
+async def repmenu_cb(callback: CallbackQuery):
+    arg = callback.data.split(":", 1)[1]
+    uid = callback.from_user.id
+    if arg in ("root", "korish", "fayl"):
+        if not await cb_guard(callback):
+            return
+        if arg == "root":
+            await show(callback, "📊 Hisobotlar:", await _root_kb(uid))
+        elif arg == "korish":
+            await show(callback, "📊 Hisobot turini tanlang:", await _korish_kb(uid))
+        else:
+            await show(callback, "📁 Yuklab olish formatini tanlang:", await _fayl_kb(uid))
+        await callback.answer()
+        return
+    # Leaf: hisobot turi — ruxsat tekshiriladi, so'ng davr/mahsulot tanlash
+    if not await _ruxsat(uid, arg):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
+        return
+    await _davr_sorov_cb(callback, arg)
+    await callback.answer()
 
 
 # ── Mahsulot tanlash callback ──

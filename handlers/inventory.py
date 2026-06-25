@@ -1,124 +1,124 @@
+"""Inventarizatsiya — inline edit-in-place oqim (v2.2)."""
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import timezone, timedelta
 import database as db
-from translation import (
-    Tkey, eq, say, say_error, build_keyboard, build_mixed_keyboard,
-)
+from translation import Tkey, say, say_error
+from .nav import cb_guard, menu_kb, show, send
+from .callbacks import CB
 
 router = Router()
 
-# GMT+5 timezone
 TOSHKENT_TZ = timezone(timedelta(hours=5))
+P_INV = "inventarizatsiya"
 
 
 class InventarizatsiyaState(StatesGroup):
-    mahsulot_tanlash = State()
-    block_tanlash = State()
     real_hisob = State()
     izoh = State()
-
-
-async def inventory_menu(user_id):
-    return await build_keyboard(user_id, [
-        ["📊 Inventarizatsiya kiritish"],
-        ["📋 Inventarizatsiya tarixi"],
-        ["🏠 Asosiy menyu"],
-    ])
-
-
-async def _kb(user_id, dinamik_rows, static_rows):
-    return await build_mixed_keyboard(user_id, dinamik_rows, static_rows)
 
 
 def _label(p):
     return f"{p['emoji']} {p['nomi']}"
 
 
-async def _mahsulot_keyboard(user_id):
-    prods = await db.get_mahsulotlar(faqat_faol=True)
-    rows = [[_label(p)] for p in prods]
-    return await _kb(user_id, rows, [["🏠 Asosiy menyu"]]), prods
+async def _root_kb(user_id):
+    return await menu_kb(user_id, [
+        [("📊 Inventarizatsiya kiritish", CB.IV_INPUT)],
+        [("📋 Inventarizatsiya tarixi", CB.IV_HIST)],
+    ])
 
 
 @router.message(Tkey("📋 Inventarizatsiya"))
-async def inventarizatsiya(message: Message):
-    await say(message, "📋 Inventarizatsiya:",
-              reply_markup=await inventory_menu(message.from_user.id))
+async def inventarizatsiya(message: Message, state: FSMContext):
+    await state.clear()
+    await send(message, "📋 Inventarizatsiya:", await _root_kb(message.from_user.id))
 
 
-@router.message(Tkey("📊 Inventarizatsiya kiritish"))
-async def inv_kiritish(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    prods = await db.get_mahsulotlar(faqat_faol=True)
-    if not prods:
-        await say(message, "❌ Mahsulot yo'q.", reply_markup=await inventory_menu(user_id))
+@router.callback_query(lambda c: c.data == CB.IV_ROOT)
+async def iv_root(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback):
         return
     await state.clear()
+    await show(callback, "📋 Inventarizatsiya:", await _root_kb(callback.from_user.id))
+    await callback.answer()
+
+
+# ── Kiritish ──
+@router.callback_query(lambda c: c.data == CB.IV_INPUT)
+async def iv_input(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_INV):
+        return
+    await state.clear()
+    prods = await db.get_mahsulotlar(faqat_faol=True)
+    if not prods:
+        await show(callback, "❌ Mahsulot yo'q.", await _root_kb(callback.from_user.id))
+        await callback.answer()
+        return
     if len(prods) == 1:
-        await _block_sorov(message, state, prods[0])
+        await _show_blocks(callback, state, prods[0])
+        await callback.answer()
         return
-    kb, _ = await _mahsulot_keyboard(user_id)
-    await state.set_state(InventarizatsiyaState.mahsulot_tanlash)
-    await say(message, "📦 Qaysi mahsulot?", reply_markup=kb)
+    dyn = [[(_label(p), f"{CB.IV_PROD}:{p['id']}")] for p in prods]
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.IV_ROOT)]], dyn)
+    await show(callback, "📦 Qaysi mahsulot?", kb)
+    await callback.answer()
 
 
-async def _block_sorov(message, state, mahsulot):
-    user_id = message.from_user.id
-    bloklar = await db.get_finished_goods(mahsulot["id"])
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.IV_PROD}:"))
+async def iv_prod(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_INV):
+        return
+    pid = int(callback.data.split(":", 1)[1])
+    mahsulot = await db.get_mahsulot(pid)
+    if not mahsulot:
+        await callback.answer("❌ Topilmadi", show_alert=True)
+        return
+    await _show_blocks(callback, state, mahsulot)
+    await callback.answer()
+
+
+async def _show_blocks(callback, state, mahsulot):
+    pid = mahsulot["id"]
+    bloklar = await db.get_finished_goods(pid)
     if not bloklar:
-        await state.clear()
-        await say(message, f"❌ '{mahsulot['nomi']}' uchun blok yo'q!",
-                  reply_markup=await inventory_menu(user_id))
+        await show(callback, f"❌ '{mahsulot['nomi']}' uchun blok yo'q!",
+                   await _root_kb(callback.from_user.id))
         return
-    await state.update_data(pid=mahsulot["id"], mahsulot_nomi=mahsulot["nomi"], bloklar=bloklar)
-    await state.set_state(InventarizatsiyaState.block_tanlash)
+    await state.set_state(None)
+    await state.update_data(pid=pid, mahsulot_nomi=mahsulot["nomi"], bloklar=bloklar)
     text = "📦 Joriy bot hisob:\n\n"
     for b in bloklar:
         text += f"   {b['nomi']}: {b['qoldiq']} ta\n"
     text += "\nQaysi blok uchun inventarizatsiya?"
-    rows = [[b["nomi"]] for b in bloklar]
-    await say(message, text, reply_markup=await _kb(user_id, rows, [["🏠 Asosiy menyu"]]))
+    dyn = [[(b["nomi"], f"{CB.IV_BLK}:{i}")] for i, b in enumerate(bloklar)]
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.IV_INPUT)]], dyn)
+    await show(callback, text, kb)
 
 
-@router.message(InventarizatsiyaState.mahsulot_tanlash)
-async def inv_mahsulot(message: Message, state: FSMContext):
-    if await eq(message, "🏠 Asosiy menyu"):
-        await state.clear()
-        return
-    prods = await db.get_mahsulotlar(faqat_faol=True)
-    text = (message.text or "").strip()
-    tanlangan = next((p for p in prods if _label(p) == text), None)
-    if not tanlangan:
-        await say(message, "❌ Tugmalardan birini tanlang!")
-        return
-    await _block_sorov(message, state, tanlangan)
-
-
-@router.message(InventarizatsiyaState.block_tanlash)
-async def inv_block(message: Message, state: FSMContext):
-    if await eq(message, "🏠 Asosiy menyu"):
-        await state.clear()
+@router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.IV_BLK}:"))
+async def iv_blk(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_INV):
         return
     data = await state.get_data()
     bloklar = data.get("bloklar", [])
-    text = (message.text or "").strip()
-    tanlangan = next((b for b in bloklar if b["nomi"] == text), None)
-    if not tanlangan:
-        await say(message, "❌ Tugmalardan birini tanlang!")
+    idx = int(callback.data.split(":", 1)[1])
+    if idx < 0 or idx >= len(bloklar):
+        await callback.answer("❌", show_alert=True)
         return
-    await state.update_data(block_kod=tanlangan["kod"], block_nomi=tanlangan["nomi"],
-                            bot_hisob=tanlangan["qoldiq"])
+    b = bloklar[idx]
+    await state.update_data(block_kod=b["kod"], block_nomi=b["nomi"], bot_hisob=b["qoldiq"])
     await state.set_state(InventarizatsiyaState.real_hisob)
-    await say(message,
-              f"🧱 {tanlangan['nomi']}\n"
-              f"Bot hisob: {tanlangan['qoldiq']} ta\n\nReal (haqiqiy) soni nechta?")
+    await show(callback,
+               f"🧱 {b['nomi']}\nBot hisob: {b['qoldiq']} ta\n\nReal (haqiqiy) soni nechta?",
+               None)
+    await callback.answer()
 
 
 @router.message(InventarizatsiyaState.real_hisob)
-async def inv_real_hisob(message: Message, state: FSMContext):
+async def iv_real(message: Message, state: FSMContext):
     try:
         real_hisob = int(message.text.strip())
         if real_hisob < 0:
@@ -137,8 +137,8 @@ async def inv_real_hisob(message: Message, state: FSMContext):
 
 
 @router.message(InventarizatsiyaState.izoh)
-async def inv_izoh(message: Message, state: FSMContext, user: dict = None):
-    user_id = message.from_user.id
+async def iv_izoh(message: Message, state: FSMContext, user: dict = None):
+    uid = message.from_user.id
     try:
         izoh = message.text.strip()
         if izoh == "0":
@@ -151,59 +151,61 @@ async def inv_izoh(message: Message, state: FSMContext, user: dict = None):
         real_hisob = data["real_hisob"]
 
         farq = await db.add_inventarizatsiya(
-            pid, db.bugungi_sana(), block_kod, bot_hisob, real_hisob, izoh, user_id)
+            pid, db.bugungi_sana(), block_kod, bot_hisob, real_hisob, izoh, uid)
 
         if user is None:
-            user = await db.get_user(user_id)
+            user = await db.get_user(uid)
         await db.add_audit_log(
-            user_id, user["ism"] if user else str(user_id),
-            user["rol"] if user else "-", "Inventarizatsiya kiritildi",
+            uid, user["ism"] if user else str(uid), user["rol"] if user else "-",
+            "Inventarizatsiya kiritildi",
             f"{data.get('mahsulot_nomi','')} | {block_nomi}: "
             f"bot={bot_hisob}, real={real_hisob}, farq={farq}")
         await state.clear()
         farq_text = f"+{farq}" if farq > 0 else str(farq)
-        await say(message,
-                  f"✅ Inventarizatsiya saqlandi!\n\n"
-                  f"🧱 {block_nomi}\n"
-                  f"   Bot hisob: {bot_hisob} ta\n"
-                  f"   Real hisob: {real_hisob} ta\n"
-                  f"   Farq: {farq_text} ta\n"
-                  f"   Bot yangilandi: {real_hisob} ta",
-                  reply_markup=await inventory_menu(user_id))
+        await send(message,
+                   f"✅ Inventarizatsiya saqlandi!\n\n"
+                   f"🧱 {block_nomi}\n"
+                   f"   Bot hisob: {bot_hisob} ta\n"
+                   f"   Real hisob: {real_hisob} ta\n"
+                   f"   Farq: {farq_text} ta\n"
+                   f"   Bot yangilandi: {real_hisob} ta",
+                   await _root_kb(uid))
     except Exception as e:
         await state.clear()
-        await say_error(message, e, reply_markup=await inventory_menu(user_id))
-
-
-@router.message(Tkey("📋 Inventarizatsiya tarixi"))
-async def inv_tarixi(message: Message):
-    try:
-        logs = await db.get_inventarizatsiya_tarixi(20)
-        if not logs:
-            await say(message, "📋 Inventarizatsiya tarixi bo'sh.",
-                      reply_markup=await inventory_menu(message.from_user.id))
-            return
-        text = "📋 Inventarizatsiya tarixi:\n\n"
-        for log in logs:
-            vaqt = log["vaqt"]
-            if hasattr(vaqt, "strftime"):
-                if vaqt.tzinfo is None:
-                    vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
-                vaqt_str = vaqt.strftime("%d.%m.%Y")
-            else:
-                vaqt_str = str(vaqt)[:10]
-            farq = log["farq"]
-            farq_text = f"+{farq}" if farq > 0 else str(farq)
-            prod = log.get("product_nomi") or ""
-            text += (
-                f"📅 {vaqt_str} | {prod} | {log['block_type']}\n"
-                f"   Bot: {log['bot_hisob']} | Real: {log['real_hisob']} | Farq: {farq_text}\n"
-                f"   {log['user_ism'] or 'Noma`lum'}\n")
-            if log["izoh"]:
-                text += f"   📝 {log['izoh']}\n"
-            text += "\n"
-        if len(text) > 4000:
-            text = text[:4000] + "\n..."
-        await say(message, text, reply_markup=await inventory_menu(message.from_user.id))
-    except Exception as e:
         await say_error(message, e)
+
+
+# ── Tarix ──
+@router.callback_query(lambda c: c.data == CB.IV_HIST)
+async def iv_hist(callback: CallbackQuery):
+    if not await cb_guard(callback, P_INV):
+        return
+    logs = await db.get_inventarizatsiya_tarixi(20)
+    if not logs:
+        await show(callback, "📋 Inventarizatsiya tarixi bo'sh.",
+                   await _root_kb(callback.from_user.id))
+        await callback.answer()
+        return
+    text = "📋 Inventarizatsiya tarixi:\n\n"
+    for log in logs:
+        vaqt = log["vaqt"]
+        if hasattr(vaqt, "strftime"):
+            if vaqt.tzinfo is None:
+                vaqt = vaqt.replace(tzinfo=timezone.utc).astimezone(TOSHKENT_TZ)
+            vaqt_str = vaqt.strftime("%d.%m.%Y")
+        else:
+            vaqt_str = str(vaqt)[:10]
+        farq = log["farq"]
+        farq_text = f"+{farq}" if farq > 0 else str(farq)
+        prod = log.get("product_nomi") or ""
+        text += (f"📅 {vaqt_str} | {prod} | {log['block_type']}\n"
+                 f"   Bot: {log['bot_hisob']} | Real: {log['real_hisob']} | Farq: {farq_text}\n"
+                 f"   {log['user_ism'] or 'Nomalum'}\n")
+        if log["izoh"]:
+            text += f"   📝 {log['izoh']}\n"
+        text += "\n"
+    if len(text) > 3800:
+        text = text[:3800] + "\n..."
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.IV_ROOT)]])
+    await show(callback, text, kb)
+    await callback.answer()

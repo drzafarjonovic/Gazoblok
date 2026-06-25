@@ -1,5 +1,22 @@
 # O'zgarishlar tarixi
 
+## v2.2.0
+
+Inline UI va kod modullashtirish — barcha imkoniyatlar saqlangan.
+
+### Yangi (inline UI)
+- **Inline-first interfeys.** Asosiy menyu Reply bo'lib qoladi (doimo qo'l ostida), undan keyingi navigatsiya va tanlash inline tugmalarda, xabar joyida tahrirlanadi (edit-in-place) — chat toza qoladi, kam xabar.
+- **Ishlab chiqarish, sotuv, ombor, tayyor mahsulot, inventarizatsiya** — to'liq inline: bo'lim menyusi, mahsulot/blok/shablon tanlash, tasdiqlash va "Ortga" tugmalari. Miqdor/narx faqat son sifatida yoziladi.
+- **Hisobot** — to'liq inline: tur (Ko'rish/Fayl/Grafik) → davr/mahsulot → natija, har bosqichda "Ortga".
+- Sotuvda blok tugmalarida joriy qoldiq ko'rsatiladi.
+- Admin boshqaruv bo'limlari (foydalanuvchilar, huquqlar, sozlamalar) kirish menyusi Reply bo'lib qoladi; operatsiyalari allaqachon inline.
+
+### Texnik
+- **Markazlashgan inline ruxsat:** `handlers/nav.py` (`cb_guard`) — inline callback'lar middleware'dan o'tmagani uchun ruxsat shu yerda tekshiriladi.
+- **`handlers/callbacks.py`** — barcha `callback_data` prefikslari bitta katalogda (`CB`).
+- Asosiy menyu sub-tugmalari inline'ga ko'chgani uchun `TUGMA_PERMISSION` xaritasidan olib tashlandi (faqat hali Reply bo'lganlar qoldi).
+- Versiya **2.2.0**.
+
 ## v2.1.1
 
 Qulaylik bo'yicha qo'shimcha yaxshilanishlar va bitta tuzatish (barcha imkoniyatlar saqlangan).

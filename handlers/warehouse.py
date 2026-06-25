@@ -1,3 +1,4 @@
+"""Ombor (xom ashyo) — inline oqim (v2.2)."""
 from aiogram import Router
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
@@ -5,36 +6,38 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import database as db
-from translation import Tkey, say, say_error, build_keyboard, t, register_ui, log_exc
+from translation import Tkey, say, t, log_exc
+from .nav import cb_guard, menu_kb, show, send
 from .callbacks import CB
 
 router = Router()
 
-# Birlik tugmalari (o'lcham bo'yicha)
 OGIRLIK_BIRLIK = ["kg", "tonna", "meshok", "g"]
 HAJM_BIRLIK = ["litr", "ml", "m3"]
-
-register_ui("📥 Xom ashyo kirim", "🏪 Joriy qoldiqlar", "❌ Bekor qilish")
+P_KIRITISH = "ombor_kiritish"
+P_KORISH = "ombor_korish"
 
 
 class WarehouseState(StatesGroup):
     miqdor = State()
 
 
-async def warehouse_menu(user_id):
-    return await build_keyboard(user_id, [
-        ["📥 Xom ashyo kirim"],
-        ["🏪 Joriy qoldiqlar"],
-        ["🏠 Asosiy menyu"],
+async def _root_kb(user_id):
+    return await menu_kb(user_id, [
+        [("📥 Xom ashyo kirim", CB.WH_INPUT)],
+        [("🏪 Joriy qoldiqlar", CB.WH_STOCK)],
     ])
 
 
-async def _ombor_kiritish_ok(user_id):
-    user = await db.get_user(user_id)
-    if not user or not user["faol"]:
-        return False
-    return (user["rol"] == "superadmin"
-            or await db.has_permission(user_id, user["rol"], "ombor_kiritish"))
+async def _material_kb(user_id):
+    """Materiallarni inline tugmalar qilib chiqaradi (ID yozish yo'q)."""
+    materials = await db.get_materials()
+    dyn = []
+    for m in materials:
+        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
+        dyn.append([(f"{m[1]} — {qoldiq_asl:.0f} {m[4]}", f"{CB.WH_MAT}:{m[0]}")])
+    kb = await menu_kb(user_id, [[("⬅️ Ortga", CB.WH_ROOT)]], dyn)
+    return kb, materials
 
 
 def _bekor_kb():
@@ -43,21 +46,7 @@ def _bekor_kb():
     ])
 
 
-async def _material_kb(user_id):
-    """Materiallarni inline tugmalar qilib chiqaradi (ID yozish yo'q)."""
-    materials = await db.get_materials()
-    kb = []
-    for m in materials:
-        qoldiq_asl = db.asosiydan_birlikga(m[2], m[4])
-        kb.append([InlineKeyboardButton(
-            text=f"{m[1]} — {qoldiq_asl:.0f} {m[4]}",
-            callback_data=f"{CB.WH_MAT}:{m[0]}")])
-    kb.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data=CB.WH_CANCEL)])
-    return InlineKeyboardMarkup(inline_keyboard=kb), materials
-
-
 def _birlik_kb(asl_birlik):
-    """Material o'lchamiga mos birlik tugmalari."""
     baza = db.birlik_bazasi(asl_birlik)
     birliklar = OGIRLIK_BIRLIK if baza == "kg" else HAJM_BIRLIK
     kb, row = [], []
@@ -72,68 +61,84 @@ def _birlik_kb(asl_birlik):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+# ── Kirish (Reply main menu) ──
 @router.message(Tkey("🏪 Ombor"))
-async def ombor(message: Message):
-    await say(message, "🏪 Ombor bo'limi:",
-              reply_markup=await warehouse_menu(message.from_user.id))
+async def ombor(message: Message, state: FSMContext):
+    await state.clear()
+    await send(message, "🏪 Ombor bo'limi:", await _root_kb(message.from_user.id))
 
 
-@router.message(Tkey("🏪 Joriy qoldiqlar"))
-async def joriy_qoldiqlar(message: Message):
-    try:
-        materials = await db.get_materials()
-        if not materials:
-            await say(message, "❌ Hali material kiritilmagan!",
-                      reply_markup=await warehouse_menu(message.from_user.id))
-            return
-        all_settings = await db.get_settings()
-        min_map = {s[3]: s[1] for s in all_settings}
-        text = "🏪 Joriy qoldiqlar:\n\n"
-        for m in materials:
-            material_id, nomi, qoldiq_asosiy, _, asl_birlik = m[0], m[1], m[2], m[3], m[4]
-            qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
-            min_ch = min_map.get(material_id)
-            status = "⚠️" if (min_ch and qoldiq_asosiy <= min_ch) else "✅"
-            text += f"{status} {nomi}: {qoldiq_asl:.2f} {asl_birlik}\n"
-            if min_ch and min_ch > 0:
-                min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
-                text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
-        await say(message, text, reply_markup=await warehouse_menu(message.from_user.id))
-    except Exception as e:
-        await say_error(message, e, reply_markup=await warehouse_menu(message.from_user.id))
-
-
-@router.message(Tkey("📥 Xom ashyo kirim"))
-async def xom_ashyo_kirim(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    materials = await db.get_materials()
-    if not materials:
-        await say(message,
-                  "❌ Avval material qo'shing!\n⚙️ Sozlamalar → ➕ Material qo'shish",
-                  reply_markup=await warehouse_menu(user_id))
+@router.callback_query(lambda c: c.data == CB.WH_ROOT)
+async def wh_root(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback):
         return
     await state.clear()
-    kb, _ = await _material_kb(user_id)
-    await say(message, "📥 Qaysi material keldi?\nTugmadan tanlang:", reply_markup=kb)
+    await show(callback, "🏪 Ombor bo'limi:", await _root_kb(callback.from_user.id))
+    await callback.answer()
+
+
+# ── Joriy qoldiqlar ──
+@router.callback_query(lambda c: c.data == CB.WH_STOCK)
+async def wh_stock(callback: CallbackQuery):
+    if not await cb_guard(callback, P_KORISH, P_KIRITISH):
+        return
+    materials = await db.get_materials()
+    if not materials:
+        await show(callback, "❌ Hali material kiritilmagan!",
+                   await _root_kb(callback.from_user.id))
+        await callback.answer()
+        return
+    all_settings = await db.get_settings()
+    min_map = {s[3]: s[1] for s in all_settings}
+    text = "🏪 Joriy qoldiqlar:\n\n"
+    ogohlar = []
+    for m in materials:
+        material_id, nomi, qoldiq_asosiy, _, asl_birlik = m[0], m[1], m[2], m[3], m[4]
+        qoldiq_asl = db.asosiydan_birlikga(qoldiq_asosiy, asl_birlik)
+        min_ch = min_map.get(material_id)
+        past = bool(min_ch and qoldiq_asosiy <= min_ch)
+        status = "⚠️" if past else "✅"
+        text += f"{status} {nomi}: {qoldiq_asl:.2f} {asl_birlik}\n"
+        if min_ch and min_ch > 0:
+            min_asl = db.asosiydan_birlikga(min_ch, asl_birlik)
+            text += f"   Min chegara: {min_asl:.2f} {asl_birlik}\n"
+        if past:
+            ogohlar.append(nomi)
+    if ogohlar:
+        text += f"\n❗ Past qoldiq: {', '.join(ogohlar)}"
+    kb = await menu_kb(callback.from_user.id, [[("⬅️ Ortga", CB.WH_ROOT)]])
+    await show(callback, text, kb)
+    await callback.answer()
+
+
+# ── Xom ashyo kirim ──
+@router.callback_query(lambda c: c.data == CB.WH_INPUT)
+async def wh_input(callback: CallbackQuery, state: FSMContext):
+    if not await cb_guard(callback, P_KIRITISH):
+        return
+    await state.clear()
+    materials = await db.get_materials()
+    if not materials:
+        await show(callback,
+                   "❌ Avval material qo'shing!\n⚙️ Sozlamalar → 📦 Materiallar",
+                   await _root_kb(callback.from_user.id))
+        await callback.answer()
+        return
+    kb, _ = await _material_kb(callback.from_user.id)
+    await show(callback, "📥 Qaysi material keldi?\nTugmadan tanlang:", kb)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == CB.WH_CANCEL)
 async def wh_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    try:
-        await callback.message.edit_text(await t("❌ Bekor qilindi.", callback.from_user.id))
-    except Exception:
-        pass
-    await callback.message.answer(
-        await t("🏪 Ombor bo'limi:", callback.from_user.id),
-        reply_markup=await warehouse_menu(callback.from_user.id))
+    await show(callback, "🏪 Ombor bo'limi:", await _root_kb(callback.from_user.id))
     await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.WH_MAT}:"))
 async def wh_mat(callback: CallbackQuery, state: FSMContext):
-    if not await _ombor_kiritish_ok(callback.from_user.id):
-        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+    if not await cb_guard(callback, P_KIRITISH):
         return
     material_id = int(callback.data.split(":", 1)[1])
     materials = await db.get_materials()
@@ -172,8 +177,8 @@ async def kirim_miqdor(message: Message, state: FSMContext):
 
 @router.callback_query(lambda c: c.data and c.data.startswith(f"{CB.WH_UNIT}:"))
 async def wh_unit(callback: CallbackQuery, state: FSMContext):
-    if not await _ombor_kiritish_ok(callback.from_user.id):
-        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+    user = await cb_guard(callback, P_KIRITISH)
+    if not user:
         return
     birlik = callback.data.split(":", 1)[1]
     data = await state.get_data()
@@ -185,7 +190,6 @@ async def wh_unit(callback: CallbackQuery, state: FSMContext):
             await callback.answer("❌ Birlik mos emas", show_alert=True)
             return
         miqdor = data["miqdor"]
-        # Hozirgi qoldiqni yangilab olamiz va atomik qo'shamiz
         kirim_asosiy, _ = db.birlikni_asosiyga(miqdor, birlik)
         materials = await db.get_materials()
         material = next((m for m in materials if m[0] == data["material_id"]), None)
@@ -193,10 +197,8 @@ async def wh_unit(callback: CallbackQuery, state: FSMContext):
         yangi = joriy + kirim_asosiy
         await db.update_material_qoldiq(data["material_id"], yangi)
 
-        user = await db.get_user(callback.from_user.id)
         await db.add_audit_log(
-            callback.from_user.id, user["ism"] if user else "-",
-            user["rol"] if user else "-", "Xom ashyo kirim",
+            callback.from_user.id, user["ism"], user["rol"], "Xom ashyo kirim",
             f"{data['material_nomi']}: +{miqdor} {birlik}")
 
         await state.clear()
@@ -206,18 +208,13 @@ async def wh_unit(callback: CallbackQuery, state: FSMContext):
             f"   Kirim: +{miqdor} {birlik}\n"
             f"   Yangi qoldiq: {yangi_asl:.2f} {data['asl_birlik']}",
             callback.from_user.id)
+        kb = await _root_kb(callback.from_user.id)
         try:
-            await callback.message.edit_text(matn)
+            await callback.message.edit_text(matn, reply_markup=kb)
         except Exception:
-            pass
-        await callback.message.answer(
-            await t("🏪 Ombor bo'limi:", callback.from_user.id),
-            reply_markup=await warehouse_menu(callback.from_user.id))
+            await callback.message.answer(matn, reply_markup=kb)
         await callback.answer("✅")
     except Exception as e:
         await state.clear()
         log_exc("wh_unit", e)
         await callback.answer("❌ Xatolik", show_alert=True)
-        await callback.message.answer(
-            await t("❌ Xatolik yuz berdi.", callback.from_user.id),
-            reply_markup=await warehouse_menu(callback.from_user.id))

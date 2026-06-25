@@ -100,3 +100,65 @@ class CB:
 
     # ── Qo'llanma (qollanma.py) ──
     QN = "qn"             # qn:<kalit>
+
+    # ════════════════════════════════════════════════════════════════
+    # Inline navigatsiya (v2.2) — operational flows.
+    # Prefikslar boshqalardan farqli: production=pd, sales=sl,
+    # finished=fg, inventory=iv (prices pr_ bilan to'qnashmasligi uchun).
+    # ════════════════════════════════════════════════════════════════
+    # Ishlab chiqarish (production.py)
+    PD_ROOT = "pd_root"
+    PD_INPUT = "pd_in"
+    PD_TODAY = "pd_today"
+    PD_DELLAST = "pd_dellast"
+    PD_PROD = "pd_prod"        # pd_prod:<pid>
+    PD_TPL = "pd_tpl"          # pd_tpl:<sid>
+    PD_BOARD = "pd_board"      # holatga qaytish
+    PD_SAVE = "pd_save"
+    PD_CANCEL = "pd_cancel"
+    PD_DELPROD = "pd_delp"     # pd_delp:<pid>
+    PD_DELOK = "pd_delok"      # pd_delok:<pid>
+
+    # Sotuv (sales.py)
+    SL_ROOT = "sl_root"
+    SL_INPUT = "sl_in"
+    SL_TODAY = "sl_today"
+    SL_DELLAST = "sl_dellast"
+    SL_PROD = "sl_prod"        # sl_prod:<pid>
+    SL_BLK = "sl_blk"          # sl_blk:<index>
+    SL_CANCEL = "sl_cancel"
+    SL_DELPROD = "sl_delp"     # sl_delp:<pid>
+    SL_DELOK = "sl_delok"      # sl_delok:<pid>
+
+    # Tayyor mahsulot (finished_goods.py)
+    FG_ROOT = "fg_root"
+    FG_QOLDIQ = "fg_q"
+    FG_EDIT = "fg_edit"
+    FG_PROD = "fg_prod"        # fg_prod:<pid>
+    FG_BLK = "fg_blk"          # fg_blk:<index>
+    FG_CANCEL = "fg_cancel"
+
+    # Inventarizatsiya (inventory.py)
+    IV_ROOT = "iv_root"
+    IV_INPUT = "iv_in"
+    IV_HIST = "iv_hist"
+    IV_PROD = "iv_prod"        # iv_prod:<pid>
+    IV_BLK = "iv_blk"          # iv_blk:<index>
+    IV_CANCEL = "iv_cancel"
+
+    # Ombor (warehouse.py) — menyu
+    WH_ROOT = "wh_root"
+    WH_INPUT = "wh_in"
+    WH_STOCK = "wh_stock"
+
+    # Hisobot (reports.py) — sub-menyu navigatsiya
+    REP_MENU = "repmenu"       # repmenu:<bo'lim>
+
+    # Foydalanuvchilar (users.py) — sub-menyu navigatsiya
+    USR_MENU = "usrmenu"       # usrmenu:<bo'lim>
+
+    # Huquqlar (permissions.py) — sub-menyu navigatsiya
+    PERM_MENU = "permmenu"     # permmenu:<bo'lim>
+
+    # Sozlamalar (settings.py) — sub-menyu navigatsiya
+    SET_MENU = "setmenu"       # setmenu:<bo'lim>

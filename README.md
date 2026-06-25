@@ -1,8 +1,8 @@
 # Manufacturing ERP Telegram Bot
 
-**v2.1** — A Telegram-based ERP/MRP system for manufacturing companies. Fully **dynamic and multi-product**: you define your own products, block types, templates, formulas and prices directly inside the bot — nothing is hard-coded. A button-driven UI (no IDs to type) with a built-in guide makes day-to-day use easy.
+**v2.2** — A Telegram-based ERP/MRP system for manufacturing companies. Fully **dynamic and multi-product**: you define your own products, block types, templates, formulas and prices directly inside the bot — nothing is hard-coded. An **inline-first UI** (edit-in-place navigation, no IDs to type) with a built-in guide makes day-to-day use fast and clean.
 
-> v1.x supported a single product (gas concrete blocks). v2.0 generalizes the whole system to any number of products. Existing data is migrated automatically (see [Migration](#migration)).
+> v1.x supported a single product (gas concrete blocks). v2.0 generalizes the whole system to any number of products. v2.1 improved UX (button-driven flows, guide). v2.2 modularizes the codebase and moves the operational and reporting flows to inline keyboards. Existing data is migrated automatically (see [Migration](#migration)).
 
 ## Overview
 
@@ -63,9 +63,10 @@ This bot is a production management platform that helps manufacturers track raw 
 - Buttons and messages translated per user; translations cached (in-memory + database) with pre-warming
 
 ### Usability
-- Button-driven UI — items are picked from inline buttons, no IDs to type; only real numbers/prices are typed
-- Confirmation prompts for destructive actions (delete material/block/template)
-- Grouped Settings menu and a built-in **Guide** section (❓ Qo'llanma) explaining every feature
+- **Inline-first UI (v2.2).** The persistent main menu stays a Reply keyboard (always one tap away); every section after it — production, sales, warehouse, finished goods, inventory and reporting — navigates with **inline buttons that edit the message in place**, keeping the chat clean. Admin-management sections (users, permissions, settings) open from a Reply sub-menu but perform their operations inline.
+- Items are picked from inline buttons, no IDs to type; only real numbers/prices are typed
+- Confirmation prompts for destructive actions (delete material/block/template, delete last entry)
+- Built-in **Guide** section (❓ Qo'llanma) explaining every feature
 
 ## Technology Stack
 
@@ -81,21 +82,37 @@ Timezone is fixed to GMT+5 (Asia/Tashkent).
 ```
 .
 ├── bot.py            # Entry point, dispatcher, middleware, PIN keypad, scheduler
-├── database.py       # PostgreSQL access layer (asyncpg) + caching + migration
-├── translation.py    # i18n: translation, cache, pre-warm, helpers
+├── database/         # PostgreSQL access layer (package, split by domain)
+│   ├── __init__.py   #   re-exports the whole public API (import database as db)
+│   ├── core.py       #   pool, cache, unit conversion, roles, schema + migration
+│   ├── users.py      #   users, roles/permissions, audit, lifecycle, PIN, stats
+│   ├── materials.py  #   raw-material warehouse, min thresholds, material prices
+│   ├── products.py   #   products/blocks/templates/formula, finished goods, costing
+│   ├── production.py #   production (atomic)
+│   ├── sales.py      #   sales (atomic) + inventory audits
+│   ├── reports.py    #   report aggregates + report subscribers
+│   └── settings.py   #   bot settings, translations cache, currency rates
+├── translation.py    # i18n: translation, cache, pre-warm, helpers, keyboards
 ├── valyuta.py        # Multi-currency conversion and rates
 ├── charts.py         # Chart / PDF generation (optional, degrades gracefully)
 ├── handlers/
-│   ├── production.py
-│   ├── sales.py
-│   ├── warehouse.py
-│   ├── finished_goods.py
-│   ├── inventory.py
+│   ├── nav.py            # inline navigation helpers (cb_guard, menu_kb, show/send)
+│   ├── callbacks.py      # centralized callback_data prefixes (CB)
+│   ├── production.py     # inline
+│   ├── sales.py          # inline
+│   ├── warehouse.py      # inline
+│   ├── finished_goods.py # inline
+│   ├── inventory.py      # inline
 │   ├── prices.py
-│   ├── reports.py
+│   ├── reports.py        # inline
 │   ├── users.py
 │   ├── permissions.py
-│   └── settings.py   # incl. dynamic Product management
+│   ├── settings.py           # aggregator router
+│   ├── settings_common.py    # shared guards/menu
+│   ├── settings_materials.py # material CRUD + thresholds
+│   ├── settings_products.py  # dynamic product management
+│   ├── settings_system.py    # report schedule, subscribers, PIN, language, wipe
+│   └── qollanma.py           # built-in guide
 ├── requirements.txt
 ├── Dockerfile
 ├── CHANGELOG.md
