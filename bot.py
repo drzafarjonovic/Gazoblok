@@ -37,7 +37,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 # Bot versiyasi
-BOT_VERSION = "2.2.0"
+BOT_VERSION = "2.2.1"
 
 # ── PIN qulf (nofaollikdan keyin) — xotira holati: {user_id: oxirgi_faollik_epoch} ──
 # Xotira keshi DB bilan birga ishlaydi: unlock vaqti DB ga saqlanadi (restartga chidamli),
@@ -659,6 +659,25 @@ async def hisobot_scheduler():
         await asyncio.sleep(30)
 
 
+# ── DB heartbeat (Supabase keep-alive) ──
+HEARTBEAT_INTERVAL = 6 * 3600  # 6 soat
+
+
+async def db_heartbeat():
+    """Har 6 soatda DB ga 'SELECT 1' yuboradi — Supabase nofaollikdan
+    pauza qilmasligi uchun. Xatoda botni to'xtatmaydi (faqat log)."""
+    log = logging.getLogger("gazobot")
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL)
+        try:
+            pool = await db.get_pool()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            log.info("DB heartbeat OK")
+        except Exception as e:
+            log_exc("db_heartbeat", e)
+
+
 async def main():
     logging.basicConfig(
         level=logging.INFO,
@@ -667,6 +686,7 @@ async def main():
     logging.getLogger("gazobot").info("ERP Bot v%s ishga tushmoqda...", BOT_VERSION)
     await db.init_db()
     asyncio.create_task(hisobot_scheduler())
+    asyncio.create_task(db_heartbeat())
     try:
         await dp.start_polling(bot)
     finally:

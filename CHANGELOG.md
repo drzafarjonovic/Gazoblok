@@ -1,5 +1,12 @@
 # O'zgarishlar tarixi
 
+## v2.2.1
+
+- **DB heartbeat (Supabase keep-alive).** Bot ichida fon vazifasi: har 6 soatda
+  DB ga `SELECT 1` yuboriladi, shunda Supabase nofaollikdan pauza qilmaydi.
+  Xatoda bot to'xtamaydi (faqat log). GitHub Actions keep-alive ham zaxira
+  sifatida qoladi (PR #3).
+
 ## v2.2.0
 
 Inline UI va kod modullashtirish — barcha imkoniyatlar saqlangan.
