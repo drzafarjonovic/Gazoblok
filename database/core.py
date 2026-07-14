@@ -11,7 +11,9 @@ import asyncio
 import os
 import time
 from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
 
+load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # ── Timezone (GMT+5 Toshkent) ──

@@ -1,5 +1,12 @@
 .env
+.secret
 __pycache__/
 *.pyc
 *.pyo
 gazobot.db
+
+# Deploy / build artefaktlari
+*.zip
+node_modules/
+android/
+.DS_Store

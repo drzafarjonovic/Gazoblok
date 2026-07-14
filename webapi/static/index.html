@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="uz" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#f8fafc">
+<title>Gazoblok ERP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+(function(){try{var t=localStorage.getItem('gz_theme');if(!t)t=(window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light';document.documentElement.setAttribute('data-theme',t);var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content',t==='dark'?'#020617':'#f8fafc');}catch(e){}})();
+function gzTheme(){var h=document.documentElement,n=h.getAttribute('data-theme')==='dark'?'light':'dark';h.setAttribute('data-theme',n);try{localStorage.setItem('gz_theme',n);}catch(e){}var b=document.getElementById('themeBtn');if(b)b.textContent=n==='dark'?'☀️':'🌙';var m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content',n==='dark'?'#020617':'#f8fafc');}
+</script>
+<style>
+:root{
+--s50:#F8FAFC;--s100:#F1F5F9;--s200:#E2E8F0;--s300:#CBD5E1;--s400:#94A3B8;--s500:#64748B;--s600:#475569;--s700:#334155;--s800:#1E293B;--s900:#0F172A;--s950:#020617;
+--p50:#EFF6FF;--p100:#DBEAFE;--p500:#3B82F6;--p600:#2563EB;--p700:#1D4ED8;--p900:#1E3A8A;
+--ok:#10B981;--ok-d:#047857;--ok-bg:#ECFDF5;--warn:#F59E0B;--warn-d:#B45309;--warn-bg:#FFFBEB;--dng:#EF4444;--dng-d:#B91C1C;--dng-bg:#FEF2F2;
+--radius:16px;--radius-sm:12px;
+}
+html[data-theme="light"]{
+--bg:var(--s50);--surface:#ffffff;--surface-2:var(--s50);--surface-3:var(--s100);--border:var(--s200);--border-2:var(--s300);
+--ink:var(--s900);--text:var(--s700);--muted:var(--s500);--faint:var(--s400);
+--glass:rgba(248,250,252,.72);--nav:rgba(255,255,255,.82);
+--sh-sm:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.06);
+--sh-md:0 1px 2px rgba(15,23,42,.05),0 6px 16px rgba(15,23,42,.08);
+--sh-lg:0 10px 34px rgba(15,23,42,.14),0 4px 10px rgba(15,23,42,.06);
+--p-tint:rgba(37,99,235,.08);--ok-tint:rgba(16,185,129,.10);--warn-tint:rgba(245,158,11,.12);--dng-tint:rgba(239,68,68,.10);
+}
+html[data-theme="dark"]{
+--bg:var(--s950);--surface:var(--s900);--surface-2:var(--s800);--surface-3:#0b1424;--border:#1e2a3f;--border-2:#26344c;
+--ink:var(--s50);--text:var(--s300);--muted:var(--s400);--faint:var(--s500);
+--glass:rgba(2,6,23,.66);--nav:rgba(15,23,42,.78);
+--sh-sm:0 1px 2px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.35);
+--sh-md:0 2px 6px rgba(0,0,0,.35),0 8px 20px rgba(0,0,0,.4);
+--sh-lg:0 14px 40px rgba(0,0,0,.55),0 6px 14px rgba(0,0,0,.4);
+--p-tint:rgba(59,130,246,.16);--ok-tint:rgba(16,185,129,.16);--warn-tint:rgba(245,158,11,.16);--dng-tint:rgba(239,68,68,.16);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-.01em;transition:background .3s,color .3s}
+h1,h2,h3{font-family:'Plus Jakarta Sans','Inter',sans-serif;color:var(--ink);letter-spacing:-.02em}
+.hide{display:none!important}
+::-webkit-scrollbar{width:0;height:0}
+#login{min-height:100dvh;display:flex;flex-direction:column;justify-content:center;padding:24px;position:relative;overflow:hidden;background:var(--bg)}
+#login::before{content:"";position:absolute;top:-28%;left:50%;transform:translateX(-50%);width:680px;height:680px;background:radial-gradient(circle at center,var(--p-tint),transparent 62%);pointer-events:none}
+#login .box{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:32px 24px;box-shadow:var(--sh-lg);max-width:400px;width:100%;margin:0 auto}
+.logo{width:64px;height:64px;margin:0 auto 16px;border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:34px;background:linear-gradient(135deg,var(--p600),var(--p700));box-shadow:0 8px 24px rgba(37,99,235,.35)}
+#login h1{font-size:26px;text-align:center;margin-bottom:4px;font-weight:800}
+#login .sub{text-align:center;color:var(--muted);margin-bottom:24px;font-size:14px}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:14px 0 6px}
+input,select,textarea{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:16px;background:var(--surface-2);color:var(--ink);font-family:inherit;transition:border-color .15s,box-shadow .15s,background .15s}
+input::placeholder{color:var(--faint)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--p500);background:var(--surface);box-shadow:0 0 0 3px var(--p-tint)}
+select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:38px}
+.btn{width:100%;padding:13px 16px;background:linear-gradient(135deg,var(--p600),var(--p700));color:#fff;border:none;border-radius:var(--radius-sm);font-size:15px;font-weight:700;font-family:inherit;margin-top:16px;cursor:pointer;letter-spacing:-.01em;box-shadow:0 1px 2px rgba(37,99,235,.24),0 6px 16px rgba(37,99,235,.20);transition:transform .12s,box-shadow .2s,filter .15s}
+.btn:hover{filter:brightness(1.05)}
+.btn:active{transform:translateY(1px);box-shadow:0 1px 2px rgba(37,99,235,.24)}
+.btn.sec{background:var(--surface);color:var(--p600);border:1px solid var(--border);box-shadow:var(--sh-sm)}
+.btn.sec:hover{border-color:var(--border-2);background:var(--surface-2);filter:none}
+html[data-theme="dark"] .btn.sec{color:#60a5fa}
+.btn.ok{background:linear-gradient(135deg,var(--ok),var(--ok-d));box-shadow:0 1px 2px rgba(16,185,129,.24),0 6px 16px rgba(16,185,129,.2)}
+.btn.dng{background:var(--dng-bg);color:var(--dng-d);border:1px solid transparent;box-shadow:none}
+html[data-theme="dark"] .btn.dng{background:var(--dng-tint);color:#fca5a5}
+.btn.sm{width:auto;padding:8px 13px;font-size:13px;margin:0;border-radius:10px;box-shadow:none}
+.err{background:var(--dng-bg);color:var(--dng-d);padding:11px 14px;border-radius:var(--radius-sm);font-size:13px;margin-top:14px;text-align:center;border:1px solid rgba(239,68,68,.2)}
+html[data-theme="dark"] .err{background:var(--dng-tint)}
+h2.sc{font-size:22px;margin-bottom:16px;font-weight:800}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:14px;box-shadow:var(--sh-sm)}
+.card h3{font-size:13px;margin-bottom:12px;display:flex;align-items:center;gap:7px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid var(--border)}
+.row:first-child{padding-top:0}
+.row:last-child{border-bottom:none;padding-bottom:0}
+.row .nm{font-weight:600;color:var(--ink)}
+.row .mt{font-size:12.5px;color:var(--muted);margin-top:2px}
+.pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;background:var(--p-tint);color:var(--p600);white-space:nowrap}
+html[data-theme="dark"] .pill{color:#93c5fd}
+.pill.warn{background:var(--warn-tint);color:var(--warn-d)}
+.pill.dng{background:var(--dng-tint);color:var(--dng-d)}
+.pill.ok{background:var(--ok-tint);color:var(--ok-d)}
+html[data-theme="dark"] .pill.warn{color:#fcd34d}html[data-theme="dark"] .pill.dng{color:#fca5a5}html[data-theme="dark"] .pill.ok{color:#6ee7b7}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--sh-sm);position:relative;overflow:hidden}
+.stat::before{content:"";position:absolute;top:0;left:0;width:3px;height:100%;background:var(--s300)}
+.stat .v{font-size:24px;font-weight:800;font-family:'Plus Jakarta Sans',sans-serif;color:var(--ink);letter-spacing:-.03em}
+.stat .l{font-size:12px;color:var(--muted);margin-top:3px;font-weight:500}
+.stat.blue::before{background:var(--p500)}.stat.blue .v{color:var(--p600)}
+.stat.green::before{background:var(--ok)}.stat.green .v{color:var(--ok-d)}
+.stat.amber::before{background:var(--warn)}.stat.amber .v{color:var(--warn-d)}
+.stat.red::before{background:var(--dng)}.stat.red .v{color:var(--dng-d)}
+html[data-theme="dark"] .stat.blue .v{color:#60a5fa}html[data-theme="dark"] .stat.green .v{color:#34d399}html[data-theme="dark"] .stat.amber .v{color:#fbbf24}html[data-theme="dark"] .stat.red .v{color:#f87171}
+.empty{text-align:center;color:var(--muted);padding:36px 14px;font-size:14px;line-height:1.7}
+.mb{margin-bottom:14px}
+.muted{color:var(--muted);font-size:13px}
+.hr{height:1px;background:var(--border);margin:16px 0}
+.subtabs{display:flex;gap:8px;overflow-x:auto;margin-bottom:16px;padding-bottom:2px}
+.subtabs button{flex:0 0 auto;padding:8px 15px;border:1px solid var(--border);background:var(--surface);border-radius:20px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;font-family:inherit;transition:all .15s}
+.subtabs button.on{background:linear-gradient(135deg,var(--p600),var(--p700));color:#fff;border-color:transparent;box-shadow:0 2px 8px rgba(37,99,235,.3)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--border)}
+tbody tr:last-child td{border-bottom:none}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+td{color:var(--text)}
+td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+#app{min-height:100dvh;display:flex;flex-direction:column;padding-bottom:78px}
+header{background:var(--glass);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px);border-bottom:1px solid var(--border);padding:13px 16px;position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:10px}
+header .t{font-weight:800;font-size:17px;color:var(--ink)}
+header .u{font-size:12px;color:var(--muted);margin-top:1px}
+.hd-r{display:flex;align-items:center;gap:8px}
+.icon-btn{width:38px;height:38px;border-radius:11px;border:1px solid var(--border);background:var(--surface);color:var(--ink);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.icon-btn:hover{background:var(--surface-2);border-color:var(--border-2)}
+.ghost-btn{padding:8px 14px;border-radius:11px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s}
+.ghost-btn:hover{background:var(--surface-2);border-color:var(--border-2)}
+#screen{flex:1;padding:18px 16px;max-width:560px;width:100%;margin:0 auto;animation:fade .3s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--nav);backdrop-filter:saturate(180%) blur(16px);-webkit-backdrop-filter:saturate(180%) blur(16px);border-top:1px solid var(--border);display:flex;overflow-x:auto;z-index:20;padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+nav button{flex:1 0 auto;min-width:60px;padding:6px;background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--faint);cursor:pointer;font-size:10px;font-weight:600;font-family:inherit;border-radius:12px;transition:color .15s}
+nav button .n-i{font-size:19px;width:34px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:9px;transition:background .2s}
+nav button.on{color:var(--p600)}
+nav button.on .n-i{background:var(--p-tint)}
+html[data-theme="dark"] nav button.on{color:#60a5fa}
+#modal{position:fixed;inset:0;background:rgba(2,6,23,.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:50;display:flex;align-items:flex-end;justify-content:center;animation:fade .2s}
+#modal .sheet{background:var(--surface);width:100%;max-width:520px;border-radius:24px 24px 0 0;padding:12px 20px 26px;max-height:92dvh;overflow-y:auto;border:1px solid var(--border);border-bottom:none;box-shadow:var(--sh-lg);animation:up .28s cubic-bezier(.16,1,.3,1)}
+#modal .sheet::before{content:"";display:block;width:38px;height:4px;border-radius:4px;background:var(--border-2);margin:0 auto 16px}
+@keyframes up{from{transform:translateY(100%)}to{transform:none}}
+#modal h3{font-size:19px;margin-bottom:16px;font-weight:800}
+.mrow{display:flex;gap:10px}
+.mrow>*{flex:1}
+.stepper{display:flex;align-items:center}
+.stepper button{width:48px;height:50px;border:1px solid var(--border);background:var(--surface-2);color:var(--ink);font-size:22px;font-weight:600;cursor:pointer;transition:background .15s}
+.stepper button:active{background:var(--surface-3)}
+.stepper button:first-child{border-radius:var(--radius-sm) 0 0 var(--radius-sm)}
+.stepper button:last-child{border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+.stepper input{border-radius:0;border-left:none;border-right:none;text-align:center;font-weight:700;font-size:17px}
+#toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:99;display:flex;flex-direction:column;gap:8px;width:92%;max-width:440px}
+.tst{padding:13px 16px;border-radius:14px;color:#fff;font-size:14px;font-weight:600;box-shadow:var(--sh-lg);animation:sl .3s cubic-bezier(.16,1,.3,1)}
+.tst.ok{background:linear-gradient(135deg,var(--ok),var(--ok-d))}
+.tst.bad{background:linear-gradient(135deg,var(--dng),var(--dng-d))}
+.tst.info{background:linear-gradient(135deg,var(--s700),var(--s800))}
+@keyframes sl{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+.spin{width:34px;height:34px;border:3px solid var(--border);border-top-color:var(--p600);border-radius:50%;animation:sp .8s linear infinite;margin:44px auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* ===== PREMIUM BATCH B ===== */
+.n-i svg{width:22px;height:22px;display:block}
+h2.sc{display:flex;align-items:center;gap:9px}
+h2.sc svg{color:var(--p600);flex:0 0 auto}
+html[data-theme="dark"] h2.sc svg{color:#60a5fa}
+.inv{border-color:var(--dng)!important;box-shadow:0 0 0 3px var(--dng-tint)!important}
+#ptr{position:fixed;top:8px;left:50%;transform:translateX(-50%) translateY(-42px);z-index:60;background:var(--surface);border:1px solid var(--border);border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;box-shadow:var(--sh-md);opacity:0;transition:opacity .2s,transform .2s;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="login">
+  <div class="box">
+    <div class="logo">🏭</div>
+    <h1>Gazoblok ERP</h1>
+    <div class="sub">Boshqaruv tizimi</div>
+    <label>Telefon raqami</label>
+    <input id="lg-tel" type="tel" inputmode="tel" placeholder="+998 90 000 00 00" autocomplete="username">
+    <label>Parol</label>
+    <input id="lg-par" type="password" placeholder="Parolingiz" autocomplete="current-password">
+    <div id="lg-err" class="err hide"></div>
+    <button class="btn" id="lg-btn">Kirish</button>
+  </div>
+</div>
+<div id="app" class="hide">
+  <header>
+    <div><div class="t" id="hd-title">Gazoblok</div><div class="u" id="hd-user"></div></div>
+    <div class="hd-r"><button class="icon-btn" id="themeBtn" onclick="gzTheme()">🌙</button><button class="ghost-btn" id="logout">Chiqish</button></div>
+  </header>
+  <div id="screen"></div>
+  <nav id="nav"></nav>
+</div>
+<div id="modal" class="hide"></div>
+<div id="toast"></div>
+<script>(function(){var b=document.getElementById('themeBtn');if(b)b.textContent=document.documentElement.getAttribute('data-theme')==='dark'?'☀️':'🌙';})();</script>
+<script>
+const API=location.origin;
+let TOKEN=localStorage.getItem('gz_token')||'';
+const STATE={me:null,perms:{},products:[],materials:[],users:[],cfgPid:null,cfgTab:'info',cfgBlocks:[],cfgTemplates:[],cfgFormula:[]};
+const $=id=>document.getElementById(id);
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+function money(n){return Math.round(n||0).toLocaleString('ru-RU')}
+function toast(msg,kind){const t=document.createElement('div');t.className='tst '+(kind||'info');t.textContent=msg;$('toast').appendChild(t);setTimeout(()=>t.remove(),3400)}
+function P(k){return !!STATE.perms[k]}
+function showModal(html){$('modal').innerHTML='<div class="sheet">'+html+'</div>';$('modal').classList.remove('hide')}
+function closeModal(){$('modal').classList.add('hide');$('modal').innerHTML=''}
+$('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});
+async function api(method,path,body){
+  const opt={method,headers:{'Authorization':'Bearer '+TOKEN}};
+  if(body!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(body)}
+  const r=await fetch(API+path,opt);
+  if(r.status===401){logout();throw new Error('Sessiya tugadi, qayta kiring')}
+  let d=null;try{d=await r.json()}catch(e){}
+  if(!r.ok)throw new Error((d&&d.detail)||('Xatolik '+r.status));
+  return d;
+}
+$('lg-btn').onclick=async()=>{
+  const tel=$('lg-tel').value.trim(),par=$('lg-par').value;
+  if(!tel||!par){if(!tel)vinv('lg-tel');if(!par)vinv('lg-par');$('lg-err').textContent='Telefon va parolni kiriting';$('lg-err').classList.remove('hide');return}
+  $('lg-btn').textContent='Kirilmoqda...';$('lg-btn').disabled=true;$('lg-err').classList.add('hide');
+  try{
+    const res=await fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({telefon:tel,parol:par})});
+    const d=await res.json();
+    if(!res.ok||!d.token)throw new Error(d.detail||'Kirish xato');
+    TOKEN=d.token;localStorage.setItem('gz_token',TOKEN);await boot();
+  }catch(e){$('lg-err').textContent=e.message||'Telefon yoki parol xato';$('lg-err').classList.remove('hide')}
+  $('lg-btn').textContent='Kirish';$('lg-btn').disabled=false;
+};
+$('lg-par').addEventListener('keydown',e=>{if(e.key==='Enter')$('lg-btn').click()});
+function logout(){TOKEN='';localStorage.removeItem('gz_token');$('app').classList.add('hide');$('login').classList.remove('hide')}
+$('logout').onclick=logout;
+const TABS=[
+  {id:'bugun',ico:ic('dash',22),nm:'Bugun',perm:()=>P('ishlab_chiqarish_korish')||P('sotuv_korish')},
+  {id:'ishlab',ico:ic('factory',22),nm:'Ishlab ch.',perm:()=>P('ishlab_chiqarish_kiritish')},
+  {id:'sotuv',ico:ic('sales',22),nm:'Sotuv',perm:()=>P('sotuv_kiritish')},
+  {id:'ombor',ico:ic('box',22),nm:'Ombor',perm:()=>P('ombor_korish')},
+  {id:'tayyor',ico:ic('archive',22),nm:'Tayyor',perm:()=>P('tayyor_mahsulot_korish')},
+  {id:'hisobot',ico:ic('chart',22),nm:'Hisobot',perm:()=>P('hisobot_korish')},
+  {id:'sozlama',ico:ic('gear',22),nm:'Sozlama',perm:()=>P('sozlama_boshqaruv')},
+  {id:'xodim',ico:ic('users',22),nm:'Xodimlar',perm:()=>P('foydalanuvchi_boshqaruv')},
+];
+let CUR='bugun';
+function renderNav(){$('nav').innerHTML=TABS.filter(t=>t.perm()).map(t=>`<button class="${t.id===CUR?'on':''}" onclick="go('${t.id}')"><span class="n-i">${t.ico}</span>${t.nm}</button>`).join('')}
+function go(id){CUR=id;renderNav();render()}
+async function boot(){
+  try{
+    STATE.me=await api('GET','/api/me');
+    STATE.perms=STATE.me.permissions||{};
+    STATE.products=await api('GET','/api/products');
+  }catch(e){logout();return}
+  $('login').classList.add('hide');$('app').classList.remove('hide');
+  $('hd-user').textContent=(STATE.me.ism||'')+' • '+(STATE.me.rol||'');
+  const first=TABS.find(t=>t.perm());CUR=first?first.id:'bugun';
+  renderNav();render();
+}
+function prodOptions(sel){return STATE.products.map(p=>`<option value="${p.id}" ${p.id==sel?'selected':''}>${esc((p.emoji||'📦')+' '+p.nomi)}</option>`).join('')}
+function loading(){$('screen').innerHTML='<div class="spin"></div>'}
+function render(){
+  $('hd-title').textContent=(TABS.find(t=>t.id===CUR)||{}).nm||'Gazoblok';
+  if(CUR==='bugun')return scBugun();
+  if(CUR==='ishlab')return scIshlab();
+  if(CUR==='sotuv')return scSotuv();
+  if(CUR==='ombor')return scOmbor();
+  if(CUR==='tayyor')return scTayyor();
+  if(CUR==='hisobot')return scHisobot();
+  if(CUR==='sozlama')return scSozlama();
+  if(CUR==='xodim')return scXodim();
+}
+let _bugunPid=null;
+async function scBugun(){
+  loading();
+  let alertHtml='';
+  if(P('ombor_korish')){try{const al=await api('GET','/api/alerts');if(al.length)alertHtml=`<div class="card" style="border:1.5px solid #fecaca"><h3>⚠️ Kam qolgan materiallar</h3>${al.map(m=>`<div class="row"><div><div class="nm">${esc(m.nomi)}</div><div class="mt">min: ${m.min} ${esc(m.birlik)}</div></div><span class="pill dng">${m.qoldiq} ${esc(m.birlik)}</span></div>`).join('')}</div>`}catch(e){}}
+  const pid=_bugunPid||(STATE.products[0]&&STATE.products[0].id);_bugunPid=pid;
+  let body='';
+  if(pid){try{
+    const r=await Promise.all([
+      P('ishlab_chiqarish_korish')?api('GET','/api/production/today?product_id='+pid):Promise.resolve(null),
+      P('sotuv_korish')?api('GET','/api/sales/today?product_id='+pid):Promise.resolve(null)]);
+    const pt=r[0],st=r[1];
+    if(pt){const bl=Object.entries(pt.bloklar||{});body+=`<div class="card"><h3>🏭 Bugungi ishlab chiqarish</h3><div class="grid2 mb"><div class="stat blue"><div class="v">${pt.jami_qolip||0}</div><div class="l">Jami qolip</div></div><div class="stat green"><div class="v">${bl.reduce((a,e)=>a+e[1],0)}</div><div class="l">Jami blok</div></div></div>${bl.length?bl.map(e=>`<div class="row"><span class="nm">${esc(e[0])}</span><span class="pill">${e[1]} dona</span></div>`).join(''):'<div class="empty">Bugun ma\'lumot yo\'q</div>'}</div>`}
+    if(st){body+=`<div class="card"><h3>💰 Bugungi sotuv</h3><div class="stat amber mb"><div class="v">${st.jami||0} dona</div><div class="l">Jami sotilgan</div></div>${(st.bloklar||[]).length?st.bloklar.map(b=>`<div class="row"><span class="nm">${esc(b.nomi||b.kod)}</span><span class="pill ok">${b.qty} dona</span></div>`).join(''):'<div class="empty">Bugun sotuv yo\'q</div>'}</div>`}
+  }catch(e){body='<div class="empty">'+esc(e.message)+'</div>'}}
+  $('screen').innerHTML=`<h2 class="sc">Salom, ${esc((STATE.me.ism||'').split(' ')[0])}! 👋</h2>${alertHtml}<div class="card"><label>Mahsulot</label><select onchange="_bugunPid=this.value;scBugun()">${prodOptions(pid)}</select></div>${body}`;
+}
+let _ishPid=null;
+async function scIshlab(){
+  loading();
+  const pid=_ishPid||(STATE.products[0]&&STATE.products[0].id);_ishPid=pid;
+  let tpl=[];try{tpl=await api('GET','/api/production/templates?product_id='+pid)}catch(e){}
+  const rows=tpl.length?tpl.map(t=>`<div class="row"><div style="flex:1"><div class="nm">${esc(t.nomi)}</div><div class="mt">${(t.chiqim||[]).map(c=>esc(c.nomi)+':'+c.soni).join(', ')||'—'}</div></div><div class="stepper" style="width:150px"><button onclick="stp('ish_${t.id}',-1)">−</button><input id="ish_${t.id}" type="number" inputmode="numeric" value="0" min="0"><button onclick="stp('ish_${t.id}',1)">+</button></div></div>`).join(''):'<div class="empty">Bu mahsulot uchun shablon yo\'q.<br>“Sozlama” bo\'limidan qo\'shing.</div>';
+  $('screen').innerHTML=`<h2 class="sc">${ic('factory',22)}Ishlab chiqarish</h2><div class="card"><label>Mahsulot</label><select onchange="_ishPid=this.value;scIshlab()">${prodOptions(pid)}</select></div><div class="card"><h3>Shablonlar (qolip soni)</h3>${rows}</div>${tpl.length?`<button class="btn" onclick="submitIshlab(${pid})">✅ Ishlab chiqarishni saqlash</button>`:''}<button class="btn dng" onclick="undoIshlab(${pid})">↩️ Oxirgi yozuvni bekor qilish</button>`;
+}
+function stp(id,d){const el=$(id);if(!el)return;el.value=Math.max(0,(parseInt(el.value)||0)+d)}
+async function submitIshlab(pid){
+  const tpl=await api('GET','/api/production/templates?product_id='+pid);const entries={};let jami=0;
+  tpl.forEach(t=>{const v=parseInt(($('ish_'+t.id)||{}).value)||0;if(v>0){entries[t.id]=v;jami+=v}});
+  if(!jami){toast('Kamida bitta shablonga son kiriting','bad');return}
+  try{const r=await api('POST','/api/production',{product_id:+pid,entries});
+    if(r.ok){toast('✅ Saqlandi! '+jami+' qolip','ok');scIshlab()}
+    else{const s=r.sabab||{};toast('❌ '+(Array.isArray(s.yetishmaydi)?('Material yetarli emas — '+s.yetishmaydi.map(x=>x.nomi+' (bor '+(Math.round(x.bor_asl*100)/100)+', kerak '+(Math.round(x.kerak_asl*100)/100)+' '+x.birlik+')').join('; ')):(s.formula_yoq?'Formula kiritilmagan':(s.shablon_yoq?'Shablon topilmadi':'Xatolik'))),'bad')}
+  }catch(e){toast(e.message,'bad')}
+}
+async function undoIshlab(pid){
+  if(!confirm('Oxirgi ishlab chiqarish yozuvi o\'chirilib, materiallar omborga qaytariladi. Davom etilsinmi?'))return;
+  try{const r=await api('POST','/api/production/undo',{product_id:+pid});toast(r.ok?'↩️ Bekor qilindi':(r.xabar||'Yozuv yo\'q'),r.ok?'ok':'bad')}catch(e){toast(e.message,'bad')}
+}
+let _sotPid=null;
+async function scSotuv(){
+  loading();
+  const pid=_sotPid||(STATE.products[0]&&STATE.products[0].id);_sotPid=pid;
+  let fg=[];try{fg=await api('GET','/api/finished-goods?product_id='+pid)}catch(e){}
+  const rows=fg.length?fg.map(b=>`<div class="row"><div style="flex:1"><div class="nm">${esc(b.nomi||b.kod)}</div><div class="mt">Ombor: ${b.qoldiq} dona</div></div><button class="btn sm" onclick="modalSotuv(${pid},${b.__i})">Sotish</button></div>`).join(''):'<div class="empty">Blok yo\'q</div>';
+  window._sotFg=fg;fg.forEach((b,i)=>b.__i=i);
+  const rows2=fg.length?fg.map((b,i)=>`<div class="row"><div style="flex:1"><div class="nm">${esc(b.nomi||b.kod)}</div><div class="mt">Ombor: ${b.qoldiq} dona</div></div><button class="btn sm" onclick="modalSotuv(${pid},${i})">Sotish</button></div>`).join(''):'<div class="empty">Blok yo\'q</div>';
+  $('screen').innerHTML=`<h2 class="sc">${ic('sales',22)}Sotuv</h2><div class="card"><label>Mahsulot</label><select onchange="_sotPid=this.value;scSotuv()">${prodOptions(pid)}</select></div><div class="card"><h3>Bloklar</h3>${rows2}</div><button class="btn dng" onclick="undoSotuv(${pid})">↩️ Oxirgi sotuvni bekor qilish</button>`;
+}
+function modalSotuv(pid,i){
+  const b=(window._sotFg||[])[i];if(!b)return;
+  showModal(`<h3>${esc(b.nomi||b.kod)} — sotuv</h3><label>Miqdor (dona)</label><div class="stepper mb"><button onclick="stp('m-qty',-1)">−</button><input id="m-qty" type="number" inputmode="numeric" value="1" min="1"><button onclick="stp('m-qty',1)">+</button></div><button class="btn ok" id="m-go">Sotishni saqlash</button>`);
+  $('m-go').onclick=async()=>{const q=parseInt($('m-qty').value)||0;if(q<=0){vinv('m-qty');toast('Miqdor kiriting','bad');return}
+    try{const r=await api('POST','/api/sales',{product_id:+pid,block_kod:b.kod,miqdor:q});toast(r.ok?'✅ Sotildi':('❌ '+(r.xabar||'Xatolik')),r.ok?'ok':'bad');if(r.ok){closeModal();scSotuv()}}catch(e){toast(e.message,'bad')}};
+}
+async function undoSotuv(pid){if(!confirm('Oxirgi sotuv bekor qilinsinmi?'))return;try{const r=await api('POST','/api/sales/undo',{product_id:+pid});toast(r.xabar||'',r.ok?'ok':'bad');if(r.ok)scSotuv()}catch(e){toast(e.message,'bad')}}
+async function scOmbor(){
+  loading();
+  try{STATE.materials=await api('GET','/api/materials')}catch(e){$('screen').innerHTML=errScreen(e.message);return}
+  const canEdit=P('ombor_kiritish');
+  const rows=STATE.materials.length?STATE.materials.map(m=>`<div class="row"><div style="flex:1"><div class="nm">${esc(m.nomi)} ${m.kam?'<span class="pill dng">kam!</span>':''}</div><div class="mt">${m.qoldiq} ${esc(m.birlik)}${m.min?' • min '+m.min:''}</div></div>${canEdit?`<button class="btn sm" onclick="modalMaterial(${m.id})">⚙️</button>`:''}</div>`).join(''):'<div class="empty">Material yo\'q</div>';
+  $('screen').innerHTML=`<h2 class="sc">${ic('box',22)}Ombor</h2>${canEdit?'<button class="btn mb" onclick="modalNewMaterial()">➕ Yangi material</button>':''}<input class="mb" id="q-omb" placeholder="Qidirish..." oninput="filtR(this,'lst-omb')"><div class="card" id="lst-omb">${rows}</div>`;
+}
+function modalNewMaterial(){
+  showModal(`<h3>Yangi material</h3><label>Nomi</label><input id="nm-n"><label>Boshlang'ich qoldiq</label><input id="nm-q" type="number" inputmode="decimal" value="0"><label>Birlik (kg, dona, litr, m3...)</label><input id="nm-b" placeholder="kg"><button class="btn" id="nm-go">Qo'shish</button>`);
+  $('nm-go').onclick=async()=>{const n=$('nm-n').value.trim(),q=parseFloat($('nm-q').value)||0,b=$('nm-b').value.trim();if(!n||!b){if(!n)vinv('nm-n');if(!b)vinv('nm-b');toast('Nomi va birlikni kiriting','bad');return}try{await api('POST','/api/materials',{nomi:n,qoldiq:q,birlik:b});toast('✅ Qo\'shildi','ok');closeModal();scOmbor()}catch(e){toast(e.message,'bad')}};
+}
+function modalMaterial(id){
+  const m=STATE.materials.find(x=>x.id===id);if(!m)return;const canNarx=P('sozlama_boshqaruv');
+  showModal(`<h3>${esc(m.nomi)}</h3><div class="muted mb">Qoldiq: ${m.qoldiq} ${esc(m.birlik)}</div><label>Kirim qo'shish (${esc(m.birlik)})</label><div class="mrow mb"><input id="mm-k" type="number" inputmode="decimal" placeholder="0"><button class="btn sm ok" style="flex:0 0 auto" onclick="doKirim(${id})">Kirim</button></div><div class="hr"></div><label>Minimum chegara (${esc(m.birlik)}) — kam qolsa ogohlantiradi</label><div class="mrow mb"><input id="mm-min" type="number" inputmode="decimal" value="${m.min||''}"><button class="btn sm" style="flex:0 0 auto" onclick="doMin(${id})">Saqlash</button></div>${canNarx?`<div class="hr"></div><label>Narx (1 ${esc(m.birlik)} = so'm) — tannarx uchun</label><div class="mrow"><input id="mm-narx" type="number" inputmode="decimal" placeholder="0"><button class="btn sm" style="flex:0 0 auto" onclick="doNarx(${id})">Saqlash</button></div>`:''}`);
+}
+async function doKirim(id){const v=parseFloat($('mm-k').value)||0;if(v<=0){toast('Miqdor kiriting','bad');return}try{const r=await api('POST','/api/materials/'+id+'/kirim',{miqdor:v});toast('✅ Yangi qoldiq: '+r.yangi_qoldiq+' '+r.birlik,'ok');closeModal();scOmbor()}catch(e){toast(e.message,'bad')}}
+async function doMin(id){const v=parseFloat($('mm-min').value)||0;try{await api('POST','/api/materials/'+id+'/min',{min_chegara:v});toast('✅ Min chegara saqlandi','ok');closeModal();scOmbor()}catch(e){toast(e.message,'bad')}}
+async function doNarx(id){const v=parseFloat($('mm-narx').value)||0;try{await api('POST','/api/materials/'+id+'/narx',{narx:v});toast('✅ Narx saqlandi','ok');closeModal()}catch(e){toast(e.message,'bad')}}
+let _tayPid=null;
+async function scTayyor(){
+  loading();
+  const pid=_tayPid||(STATE.products[0]&&STATE.products[0].id);_tayPid=pid;
+  let fg=[];try{fg=await api('GET','/api/finished-goods?product_id='+pid)}catch(e){}
+  window._tayFg=fg;const canInv=P('inventarizatsiya');
+  const rows=fg.length?fg.map((b,i)=>`<div class="row"><div style="flex:1"><div class="nm">${esc(b.nomi||b.kod)}</div><div class="mt">${esc(b.olcham||'')}</div></div><span class="pill">${b.qoldiq} dona</span>${canInv?`<button class="btn sm" onclick="modalInv(${pid},${i})">📋</button>`:''}</div>`).join(''):'<div class="empty">Blok yo\'q</div>';
+  $('screen').innerHTML=`<h2 class="sc">${ic('archive',22)}Tayyor mahsulot</h2><div class="card"><label>Mahsulot</label><select onchange="_tayPid=this.value;scTayyor()">${prodOptions(pid)}</select></div><input class="mb" id="q-tay" placeholder="Qidirish..." oninput="filtR(this,'lst-tay')"><div class="card" id="lst-tay">${rows}</div>${canInv?'<div class="muted" style="text-align:center">📋 tugma — inventarizatsiya (real hisobni kiritish)</div>':''}`;
+}
+function modalInv(pid,i){
+  const b=(window._tayFg||[])[i];if(!b)return;
+  showModal(`<h3>Inventarizatsiya — ${esc(b.nomi||b.kod)}</h3><div class="muted mb">Tizim hisobi: <b>${b.qoldiq}</b> dona</div><label>Haqiqiy (real) hisob</label><input id="iv-r" type="number" inputmode="numeric" value="${b.qoldiq}"><label>Izoh (ixtiyoriy)</label><input id="iv-z" placeholder="masalan: yil oxiri sanoq"><button class="btn" id="iv-go">Saqlash</button>`);
+  $('iv-go').onclick=async()=>{const r=parseInt($('iv-r').value);if(isNaN(r)){toast('Real hisobni kiriting','bad');return}try{const d=await api('POST','/api/inventory',{product_id:+pid,block_kod:b.kod,real_hisob:r,izoh:$('iv-z').value.trim()});toast('✅ Saqlandi. Farq: '+(d.farq>0?'+':'')+d.farq,'ok');closeModal();scTayyor()}catch(e){toast(e.message,'bad')}};
+}
+function todayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function monthStart(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-01'}
+let _rep={from:monthStart(),to:todayStr(),pid:''};
+function scHisobot(){
+  $('screen').innerHTML=`<h2 class="sc">${ic('chart',22)}Hisobot</h2><div class="card"><div class="mrow mb"><div><label>Dan</label><input id="rp-f" type="date" value="${_rep.from}"></div><div><label>Gacha</label><input id="rp-t" type="date" value="${_rep.to}"></div></div><label>Mahsulot</label><select id="rp-p"><option value="">Barchasi</option>${prodOptions(_rep.pid)}</select><button class="btn" onclick="runReport()">🔍 Hisoblash</button>${P('excel_hisobot')?'<button class="btn sec" onclick="dlExcel()">📥 Excel yuklab olish</button>':''}</div><div id="rp-out"></div>`;
+}
+function repParams(){_rep.from=$('rp-f').value;_rep.to=$('rp-t').value;_rep.pid=$('rp-p').value;let q='from='+_rep.from+'&to='+_rep.to;if(_rep.pid)q+='&product_id='+_rep.pid;return q}
+function tbl(head,rows){return rows.length?`<table><thead><tr>${head}</tr></thead><tbody>${rows.join('')}</tbody></table>`:'<div class="empty">Ma\'lumot yo\'q</div>'}
+async function runReport(){
+  const q=repParams();$('rp-out').innerHTML='<div class="spin"></div>';
+  try{
+    const s=await api('GET','/api/reports/summary?'+q);
+    let fin=null;if(P('moliya_korish')){try{fin=await api('GET','/api/finance/summary?'+q)}catch(e){}}
+    let h=`<div class="grid2 mb"><div class="stat blue"><div class="v">${s.jami_qolip}</div><div class="l">Ishlab ch. (qolip)</div></div><div class="stat green"><div class="v">${s.jami_sotuv}</div><div class="l">Sotuv (dona)</div></div><div class="stat amber"><div class="v">${money(s.daromad)}</div><div class="l">Daromad (so'm)</div></div><div class="stat red"><div class="v">${money(s.material_xarajat)}</div><div class="l">Material xarajat</div></div></div>`;
+    if(fin)h+=`<div class="card"><h3>💵 Moliya</h3><div class="row"><span>Daromad</span><b>${money(fin.daromad)} so'm</b></div><div class="row"><span>Tannarx (COGS)</span><b>${money(fin.cogs)} so'm</b></div><div class="row"><span class="nm">Sof foyda</span><b style="color:${fin.foyda>=0?'var(--ok)':'var(--dng)'}">${money(fin.foyda)} so'm</b></div><div class="row"><span>Ombor qiymati</span><b>${money(fin.ombor_qiymati)} so'm</b></div></div>`;
+    h+=`<div class="card"><h3>🏭 Ishlab chiqarish (bloklar)</h3>${tbl('<th>Mahsulot</th><th>Blok</th><th class="r">Soni</th>',s.prod_blocks.map(b=>`<tr><td>${esc(b.product_nomi)}</td><td>${esc(b.blok_nomi)}</td><td class="r">${b.soni}</td></tr>`))}</div>`;
+    h+=`<div class="card"><h3>💰 Sotuv (bloklar)</h3>${tbl('<th>Mahsulot</th><th>Blok</th><th class="r">Soni</th><th class="r">Daromad</th>',s.sales_blocks.map(b=>`<tr><td>${esc(b.product_nomi)}</td><td>${esc(b.blok_nomi)}</td><td class="r">${b.qty}</td><td class="r">${money(b.rev)}</td></tr>`))}</div>`;
+    h+=`<div class="card"><h3>📦 Material sarfi</h3>${tbl('<th>Material</th><th class="r">Sarf</th><th class="r">Summa</th>',s.material_sarfi.map(m=>`<tr><td>${esc(m.nomi)}</td><td class="r">${m.jami} ${esc(m.birlik)}</td><td class="r">${money(m.jami*m.narx)}</td></tr>`))}</div>`;
+    h+=`<div class="card"><h3>👥 Xodimlar (ishlab ch.)</h3>${tbl('<th>Xodim</th><th class="r">Qolip</th><th class="r">Ish haqi</th>',s.by_user_prod.map(u=>`<tr><td>${esc(u.ism)} <span class="muted">${esc(u.rol)}</span></td><td class="r">${u.qolip}</td><td class="r">${money(u.haq)}</td></tr>`))}</div>`;
+    h+=`<div class="card"><h3>👥 Xodimlar (sotuv)</h3>${tbl('<th>Xodim</th><th class="r">Sotuv</th><th class="r">Daromad</th>',s.by_user_sales.map(u=>`<tr><td>${esc(u.ism)} <span class="muted">${esc(u.rol)}</span></td><td class="r">${u.qty}</td><td class="r">${money(u.rev)}</td></tr>`))}</div>`;
+    $('rp-out').innerHTML=h;
+  }catch(e){$('rp-out').innerHTML='<div class="empty">'+esc(e.message)+'</div>'}
+}
+async function dlExcel(){
+  const q=repParams();toast('Excel tayyorlanmoqda...','info');
+  try{
+    const r=await fetch(API+'/api/reports/excel?'+q,{headers:{'Authorization':'Bearer '+TOKEN}});
+    if(!r.ok){toast('Xatolik: Excel yuklanmadi','bad');return}
+    const b=await r.blob();const u=URL.createObjectURL(b);const a=document.createElement('a');
+    a.href=u;a.download='hisobot_'+_rep.from+'_'+_rep.to+'.xlsx';document.body.appendChild(a);a.click();
+    a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);toast('✅ Yuklandi','ok');
+  }catch(e){toast(e.message,'bad')}
+}
+async function scSozlama(){
+  const pid=STATE.cfgPid||(STATE.products[0]&&STATE.products[0].id);STATE.cfgPid=pid;
+  const tabs=[['info','Ma\'lumot'],['blocks','Bloklar'],['templates','Shablonlar'],['formula','Formula']];
+  $('screen').innerHTML=`<h2 class="sc">${ic('gear',22)}Sozlama</h2><button class="btn sec mb" onclick="modalNewProduct()">➕ Yangi mahsulot</button><div class="card"><label>Mahsulot</label><select onchange="STATE.cfgPid=this.value;scSozlama()">${prodOptions(pid)}</select></div><div class="subtabs">${tabs.map(t=>`<button class="${STATE.cfgTab===t[0]?'on':''}" onclick="STATE.cfgTab='${t[0]}';scSozlama()">${t[1]}</button>`).join('')}</div><div id="cfg-body"><div class="spin"></div></div>`;
+  if(!pid){$('cfg-body').innerHTML='<div class="empty">Avval mahsulot qo\'shing</div>';return}
+  if(STATE.cfgTab==='info')return cfgInfo(pid);
+  if(STATE.cfgTab==='blocks')return cfgBlocks(pid);
+  if(STATE.cfgTab==='templates')return cfgTemplates(pid);
+  if(STATE.cfgTab==='formula')return cfgFormula(pid);
+}
+function cfgInfo(pid){
+  const p=STATE.products.find(x=>x.id==pid)||{};
+  $('cfg-body').innerHTML=`<div class="card"><label>Nomi</label><input id="ci-n" value="${esc(p.nomi||'')}"><label>Emoji</label><input id="ci-e" value="${esc(p.emoji||'📦')}"><label>Ishchi haqi (1 qolip uchun, so'm)</label><input id="ci-h" type="number" inputmode="decimal" value="${p.ishchi_haqi||0}"><label>Qo'shimcha xarajat (1 qolip, so'm)</label><input id="ci-q" type="number" inputmode="decimal" value="${p.qoshimcha_xarajat||0}"><button class="btn" onclick="saveInfo(${pid})">Saqlash</button></div>`;
+}
+async function saveInfo(pid){try{await api('PATCH','/api/products/'+pid,{nomi:$('ci-n').value.trim(),emoji:$('ci-e').value.trim(),ishchi_haqi:parseFloat($('ci-h').value)||0,qoshimcha:parseFloat($('ci-q').value)||0});STATE.products=await api('GET','/api/products');toast('✅ Saqlandi','ok');scSozlama()}catch(e){toast(e.message,'bad')}}
+async function cfgBlocks(pid){
+  let bl=[];try{bl=await api('GET','/api/products/'+pid+'/blocks')}catch(e){}
+  STATE.cfgBlocks=bl;
+  const rows=bl.length?bl.map((b,i)=>`<div class="row"><div style="flex:1"><div class="nm">${esc(b.nomi)} <span class="muted">(${esc(b.kod)})</span></div><div class="mt">${esc(b.olcham||'')} • 1 qolip=${b.qolip_dona} dona • narx ${money(b.sotuv_narx)}</div></div><button class="btn sm" onclick="modalBlock(${i})">✏️</button><button class="btn sm dng" onclick="delBlock(${b.id})">🗑</button></div>`).join(''):'<div class="empty">Blok yo\'q</div>';
+  $('cfg-body').innerHTML=`<button class="btn sec mb" onclick="modalBlock(-1)">➕ Yangi blok</button><div class="card">${rows}</div>`;
+}
+function modalBlock(i){
+  const isNew=i<0;const b=isNew?{}:STATE.cfgBlocks[i];
+  showModal(`<h3>${isNew?'Yangi blok':'Blokni tahrirlash'}</h3>${isNew?'<label>Kod (masalan B1)</label><input id="bk-kod">':''}<label>Nomi</label><input id="bk-n" value="${esc(b.nomi||'')}"><label>O'lcham</label><input id="bk-o" value="${esc(b.olcham||'')}"><label>1 qolipdan necha dona</label><input id="bk-d" type="number" inputmode="decimal" value="${b.qolip_dona||0}"><label>Sotuv narxi (so'm)</label><input id="bk-s" type="number" inputmode="decimal" value="${b.sotuv_narx||0}"><button class="btn" id="bk-go">Saqlash</button>`);
+  $('bk-go').onclick=async()=>{const body={nomi:$('bk-n').value.trim(),olcham:$('bk-o').value.trim(),qolip_dona:parseFloat($('bk-d').value)||0,sotuv_narx:parseFloat($('bk-s').value)||0};if(!body.nomi){toast('Nomini kiriting','bad');return}try{if(isNew){body.kod=$('bk-kod').value.trim();if(!body.kod){toast('Kod kiriting','bad');return}await api('POST','/api/products/'+STATE.cfgPid+'/blocks',body)}else{await api('PATCH','/api/blocks/'+b.id,body)}toast('✅ Saqlandi','ok');closeModal();cfgBlocks(STATE.cfgPid)}catch(e){toast(e.message,'bad')}};
+}
+async function delBlock(id){if(!confirm('Blok o\'chirilsinmi? Unga bog\'liq shablon chiqimlari ham o\'chadi.'))return;try{await api('DELETE','/api/blocks/'+id);toast('🗑 O\'chirildi','ok');cfgBlocks(STATE.cfgPid)}catch(e){toast(e.message,'bad')}}
+async function cfgTemplates(pid){
+  let tp=[],bl=[];try{const r=await Promise.all([api('GET','/api/products/'+pid+'/templates-config'),api('GET','/api/products/'+pid+'/blocks')]);tp=r[0];bl=r[1]}catch(e){}
+  STATE.cfgTemplates=tp;STATE.cfgBlocks=bl;
+  const rows=tp.length?tp.map((t,i)=>`<div class="row"><div style="flex:1"><div class="nm">${esc(t.nomi)} <span class="muted">(${esc(t.kod)})</span></div><div class="mt">${(t.chiqim||[]).map(c=>esc(c.nomi)+':'+c.soni).join(', ')||'chiqim yo\'q'}</div></div><button class="btn sm" onclick="modalChiqim(${i})">Chiqim</button><button class="btn sm dng" onclick="delTemplate(${t.id})">🗑</button></div>`).join(''):'<div class="empty">Shablon yo\'q</div>';
+  $('cfg-body').innerHTML=`<button class="btn sec mb" onclick="modalNewTemplate()">➕ Yangi shablon</button><div class="card">${rows}</div>`;
+}
+function modalNewTemplate(){
+  showModal(`<h3>Yangi shablon</h3><label>Kod (masalan S1)</label><input id="tp-k"><label>Nomi</label><input id="tp-n"><button class="btn" id="tp-go">Qo'shish</button>`);
+  $('tp-go').onclick=async()=>{const k=$('tp-k').value.trim(),n=$('tp-n').value.trim();if(!k||!n){toast('Kod va nomini kiriting','bad');return}try{await api('POST','/api/products/'+STATE.cfgPid+'/templates',{kod:k,nomi:n});toast('✅ Qo\'shildi','ok');closeModal();cfgTemplates(STATE.cfgPid)}catch(e){toast(e.message,'bad')}};
+}
+function modalChiqim(i){
+  const t=STATE.cfgTemplates[i];const bl=STATE.cfgBlocks;
+  if(!bl.length){toast('Avval blok qo\'shing','bad');return}
+  const cur={};(t.chiqim||[]).forEach(c=>cur[c.block_kod]=c.soni);
+  const inputs=bl.map((b,idx)=>`<div class="row"><span class="nm">${esc(b.nomi)} <span class="muted">(${esc(b.kod)})</span></span><input style="width:90px" id="ch_${idx}" type="number" inputmode="numeric" value="${cur[b.kod]||0}" min="0"></div>`).join('');
+  showModal(`<h3>${esc(t.nomi)} — chiqim</h3><div class="muted mb">1 qolipdan har bir blokdan necha dona chiqadi</div><div class="card">${inputs}</div><button class="btn" id="ch-go">Saqlash</button>`);
+  $('ch-go').onclick=async()=>{const chiqim=bl.map((b,idx)=>({block_kod:b.kod,soni:parseInt(($('ch_'+idx)||{}).value)||0}));try{await api('POST','/api/templates/'+t.id+'/chiqim',{chiqim});toast('✅ Saqlandi','ok');closeModal();cfgTemplates(STATE.cfgPid)}catch(e){toast(e.message,'bad')}};
+}
+async function delTemplate(id){if(!confirm('Shablon o\'chirilsinmi?'))return;try{await api('DELETE','/api/templates/'+id);toast('🗑 O\'chirildi','ok');cfgTemplates(STATE.cfgPid)}catch(e){toast(e.message,'bad')}}
+async function cfgFormula(pid){
+  let fm=[],mt=[];try{const r=await Promise.all([api('GET','/api/products/'+pid+'/formula'),api('GET','/api/materials')]);fm=r[0];mt=r[1]}catch(e){}
+  STATE.cfgFormula=fm;STATE.materials=mt;
+  const rows=fm.length?fm.map(f=>`<div class="row"><div style="flex:1"><div class="nm">${esc(f.nomi)}</div><div class="mt">${f.miqdor} ${esc(f.birlik)} / 1 qolip</div></div><button class="btn sm dng" onclick="delFormula(${pid},${f.material_id})">🗑</button></div>`).join(''):'<div class="empty">Formula yo\'q</div>';
+  $('cfg-body').innerHTML=`<div class="muted mb">1 qolip uchun qancha material ketishi (material avtomatik shu asosda kamayadi)</div><button class="btn sec mb" onclick="modalFormula(${pid})">➕ Material qo'shish</button><div class="card">${rows}</div>`;
+}
+function modalFormula(pid){
+  const mt=STATE.materials;if(!mt.length){toast('Avval Ombor bo\'limida material qo\'shing','bad');return}
+  showModal(`<h3>Formulaga material</h3><label>Material</label><select id="fm-m">${mt.map(m=>`<option value="${m.id}" data-b="${esc(m.birlik)}">${esc(m.nomi)} (${esc(m.birlik)})</option>`).join('')}</select><label>Miqdor (1 qolip uchun)</label><input id="fm-q" type="number" inputmode="decimal"><label>Birlik</label><input id="fm-b" value="${esc(mt[0].birlik)}"><button class="btn" id="fm-go">Qo'shish</button>`);
+  $('fm-m').onchange=function(){const o=this.options[this.selectedIndex];$('fm-b').value=o.getAttribute('data-b')||''};
+  $('fm-go').onclick=async()=>{const mid=+$('fm-m').value,q=parseFloat($('fm-q').value)||0,b=$('fm-b').value.trim();if(q<=0||!b){toast('Miqdor va birlikni kiriting','bad');return}try{await api('POST','/api/products/'+pid+'/formula',{material_id:mid,miqdor:q,birlik:b});toast('✅ Qo\'shildi','ok');closeModal();cfgFormula(pid)}catch(e){toast(e.message,'bad')}};
+}
+async function delFormula(pid,mid){if(!confirm('Material formuladan olib tashlansinmi?'))return;try{await api('DELETE','/api/products/'+pid+'/formula/'+mid);toast('🗑 O\'chirildi','ok');cfgFormula(pid)}catch(e){toast(e.message,'bad')}}
+function modalNewProduct(){
+  showModal(`<h3>Yangi mahsulot</h3><label>Kod (masalan gazoblok)</label><input id="np-k"><label>Nomi</label><input id="np-n"><label>Emoji</label><input id="np-e" value="📦"><button class="btn" id="np-go">Qo'shish</button>`);
+  $('np-go').onclick=async()=>{const k=$('np-k').value.trim(),n=$('np-n').value.trim();if(!k||!n){toast('Kod va nomini kiriting','bad');return}try{const r=await api('POST','/api/products',{kod:k,nomi:n,emoji:$('np-e').value.trim()||'📦'});STATE.products=await api('GET','/api/products');STATE.cfgPid=r.id;STATE.cfgTab='info';toast('✅ Qo\'shildi','ok');closeModal();scSozlama()}catch(e){toast(e.message,'bad')}};
+}
+const ROLLAR=['superadmin','direktor','omborchi','ishchi','sotuvchi','hisobchi'];
+function rolOptions(sel){return ROLLAR.map(r=>`<option value="${r}" ${r===sel?'selected':''}>${r}</option>`).join('')}
+async function scXodim(){
+  loading();
+  try{STATE.users=await api('GET','/api/users')}catch(e){$('screen').innerHTML=errScreen(e.message);return}
+  const rows=STATE.users.map((u,i)=>`<div class="row"><div style="flex:1"><div class="nm">${esc(u.ism)} ${!u.faol?'<span class="pill dng">bloklangan</span>':''}</div><div class="mt">${esc(u.rol)} • ${u.telefon?esc(u.telefon):'login yo\'q'} ${u.parol_bor?'🔑':''}</div></div><button class="btn sm" onclick="modalUser(${i})">��️</button></div>`).join('');
+  $('screen').innerHTML=`<h2 class="sc">${ic('users',22)}Xodimlar</h2><button class="btn mb" onclick="modalNewUser()">➕ Yangi xodim</button><input class="mb" id="q-xod" placeholder="Qidirish..." oninput="filtR(this,'lst-xod')"><div class="card" id="lst-xod">${rows||'<div class="empty">Xodim yo\'q</div>'}</div>`;
+}
+function modalNewUser(){
+  showModal(`<h3>Yangi xodim</h3><label>Ism</label><input id="nu-i"><label>Telefon (login uchun)</label><input id="nu-t" type="tel" placeholder="+998..."><label>Parol</label><input id="nu-p"><label>Rol</label><select id="nu-r">${rolOptions('ishchi')}</select><button class="btn" id="nu-go">Qo'shish</button>`);
+  $('nu-go').onclick=async()=>{const i=$('nu-i').value.trim(),t=$('nu-t').value.trim(),p=$('nu-p').value,r=$('nu-r').value;if(!i||!t||!p){if(!i)vinv('nu-i');if(!t)vinv('nu-t');if(!p)vinv('nu-p');toast('Ism, telefon va parolni kiriting','bad');return}try{await api('POST','/api/users',{ism:i,telefon:t,parol:p,rol:r});toast('✅ Qo\'shildi','ok');closeModal();scXodim()}catch(e){toast(e.message,'bad')}};
+}
+function modalUser(i){
+  const u=STATE.users[i];
+  showModal(`<h3>${esc(u.ism)}</h3><label>Rol</label><div class="mrow mb"><select id="us-r">${rolOptions(u.rol)}</select><button class="btn sm" style="flex:0 0 auto" onclick="saveRol(${u.id})">Saqlash</button></div><div class="hr"></div><label>Login ma'lumotini o'zgartirish</label><input id="us-t" class="mb" type="tel" placeholder="Telefon" value="${esc(u.telefon||'')}"><input id="us-p" placeholder="Yangi parol (ixtiyoriy)"><button class="btn" onclick="saveCreds(${u.id})">Loginni saqlash</button><div class="hr"></div>${u.faol?`<button class="btn dng" onclick="blockUser(${u.id})">🚫 Xodimni bloklash</button>`:'<div class="muted">Bu xodim bloklangan</div>'}`);
+}
+async function saveRol(id){try{await api('PATCH','/api/users/'+id,{rol:$('us-r').value});toast('✅ Rol saqlandi','ok');closeModal();scXodim()}catch(e){toast(e.message,'bad')}}
+async function saveCreds(id){const t=$('us-t').value.trim(),p=$('us-p').value;const body={};if(t)body.telefon=t;if(p)body.parol=p;if(!t&&!p){toast('Telefon yoki parol kiriting','bad');return}try{await api('POST','/api/users/'+id+'/credentials',body);toast('✅ Saqlandi','ok');closeModal();scXodim()}catch(e){toast(e.message,'bad')}}
+async function blockUser(id){if(!confirm('Xodim bloklansinmi? U tizimga kira olmaydi.'))return;try{await api('DELETE','/api/users/'+id);toast('🚫 Bloklandi','ok');closeModal();scXodim()}catch(e){toast(e.message,'bad')}}
+function ic(n,s){s=s||20;var p={dash:'<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="11" width="8" height="10" rx="1.5"/><rect x="3" y="15" width="8" height="6" rx="1.5"/>',factory:'<path d="M3 21V10l6 4V10l6 4V6l6 4v11z"/><path d="M2 21h20"/>',sales:'<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.8"/><path d="M6 9v6M18 9v6"/>',box:'<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/>',chart:'<path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/>',gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',users:'<circle cx="9" cy="8" r="3.4"/><path d="M2.6 20c0-3.4 2.9-6 6.4-6s6.4 2.6 6.4 6"/><path d="M16 4.8a3.3 3.3 0 0 1 0 6.4"/><path d="M17.6 14.2c2.3.5 4 2.5 4 5"/>',search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>'};return '<svg viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+(p[n]||'')+'</svg>';}
+function filtR(inp,id){var q=inp.value.trim().toLowerCase();var c=$(id);if(!c)return;c.querySelectorAll('.row').forEach(function(r){r.style.display=(q&&r.textContent.toLowerCase().indexOf(q)<0)?'none':'';});}
+function errScreen(msg){return '<div class="empty"><div class="ei">📡</div><div class="nm" style="color:var(--ink)">Maʼlumot yuklanmadi</div><div class="mt">'+esc(msg||'Internet aloqasini tekshiring')+'</div><button class="btn sec sm" style="margin-top:14px" onclick="render()">Qayta urinish</button></div>';}
+function vinv(id){var el=$(id);if(!el)return false;el.classList.add('inv');el.addEventListener('input',function(){el.classList.remove('inv')},{once:true});try{el.focus()}catch(e){}return false;}
+function _animNum(el){var raw=el.textContent||'';var m=raw.match(/\d{1,3}(?:[\s\u00A0\u202F]\d{3})+|\d+/);if(!m)return;var numStr=m[0];var digits=numStr.replace(/[^\d]/g,'');if(!digits)return;var target=parseInt(digits,10);if(!isFinite(target)||target<=1)return;var pre=raw.slice(0,m.index),suf=raw.slice(m.index+numStr.length);var fmt=/[\s\u00A0\u202F]/.test(numStr);var dur=650,st=null;function step(ts){if(!st)st=ts;var pr=Math.min(1,(ts-st)/dur);var e=1-Math.pow(1-pr,3);var cur=Math.round(target*e);el.textContent=pre+(fmt?cur.toLocaleString('ru-RU'):String(cur))+suf;if(pr<1)requestAnimationFrame(step);}requestAnimationFrame(step);}
+try{new MutationObserver(function(){document.querySelectorAll('#screen .stat .v').forEach(function(el){if(el.getAttribute('data-cu'))return;el.setAttribute('data-cu','1');_animNum(el);});}).observe($('screen'),{childList:true,subtree:true});}catch(e){}
+(function(){var sy=0,pull=0,active=false,ind=null;function ind_(){if(!ind){ind=document.createElement('div');ind.id='ptr';ind.innerHTML='<div class="spin" style="margin:0;width:24px;height:24px"></div>';document.body.appendChild(ind);}return ind;}document.addEventListener('touchstart',function(e){if(window.scrollY<=0&&$('app')&&!$('app').classList.contains('hide')&&$('modal').classList.contains('hide')){sy=e.touches[0].clientY;active=true;pull=0;}else{active=false;}},{passive:true});document.addEventListener('touchmove',function(e){if(!active)return;pull=e.touches[0].clientY-sy;if(pull>0){var d=Math.min(pull,90);var el=ind_();el.style.transform='translateX(-50%) translateY('+(d-42)+'px)';el.style.opacity=Math.min(1,d/70);}},{passive:true});document.addEventListener('touchend',function(){if(active&&pull>70){if(ind)ind.style.transform='translateX(-50%) translateY(16px)';try{render()}catch(e){}setTimeout(function(){if(ind){ind.style.opacity='0';ind.style.transform='translateX(-50%) translateY(-42px)';}},650);}else if(ind){ind.style.opacity='0';ind.style.transform='translateX(-50%) translateY(-42px)';}active=false;pull=0;});})();
+window.addEventListener('offline',function(){toast('Internet aloqasi uzildi','bad');});window.addEventListener('online',function(){toast('Internet qaytdi','ok');});
+(function(){var tg=window.Telegram&&window.Telegram.WebApp;if(tg&&tg.platform&&tg.platform!=='unknown'){try{tg.ready();tg.expand();if(tg.disableVerticalSwipes)tg.disableVerticalSwipes();var dk=document.documentElement.getAttribute('data-theme')==='dark';if(tg.setHeaderColor)tg.setHeaderColor(dk?'#0f172a':'#ffffff');if(tg.setBackgroundColor)tg.setBackgroundColor(dk?'#020617':'#f8fafc');document.documentElement.classList.add('in-telegram');}catch(e){}}})();
+(async function(){if(TOKEN){try{await boot()}catch(e){}return;}var tg=window.Telegram&&window.Telegram.WebApp;var initData=tg&&tg.initData;if(tg&&tg.platform&&tg.platform!=='unknown'&&initData){try{var res=await fetch(API+'/api/auth/telegram',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({init_data:initData})});if(res.ok){var d=await res.json();TOKEN=d.token;localStorage.setItem('gz_token',TOKEN);await boot();return;}else if(res.status===403){try{var ej=await res.json();toast((ej&&ej.detail)||'Bu Telegram hisobi tizimda topilmadi','bad');}catch(_){}}}catch(e){}}})();
+</script>
+</body>
+</html>
